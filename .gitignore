@@ -1,1 +1,52 @@
+# ========================
+# Betriebssystem
+# ========================
+
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# Windows
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+
+# ========================
+# Editor & IDEs
+# ========================
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Vim / Neovim
+*.swp
+*.swo
+Session.vim
+
+
+# ========================
+# Logs & Debugging
+# ========================
+
+*.log
+logs/
+
+
+# ========================
+# Temporäre Dateien
+# ========================
+
+*.tmp
+*.temp
+*.bak
+*.cache
+.cache/
+tmp/
+temp/
