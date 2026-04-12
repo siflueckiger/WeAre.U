@@ -24,7 +24,7 @@ int startTime;
 boolean w, s, a, d, up, down, left, right;
 
 void setup() {
-  size(800, 800);
+  size(600, 600);
   oscP5 = new OscP5(this, 12000);
   // IP des Empfängers (z.B. Raspberry Pi oder VR-Brille) eintragen
   receiverAddress = new NetAddress("127.0.0.1", 12001); 
