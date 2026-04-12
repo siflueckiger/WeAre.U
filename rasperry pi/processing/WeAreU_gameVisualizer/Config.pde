@@ -24,6 +24,4 @@ final float POWERUP_SIZE = 35.0;
 final color COL_P1       = #3296FF;  // Blau
 final color COL_P2       = #FF3232;  // Rot
 final color COL_COIN     = #FFFF00;  // Gelb
-final color COL_POWERUP  = #00FF64;  // Grün
-final color COL_OBSTACLE = #969696;  // Grau
 final color COL_BG       = #141414;  // Hintergrund
