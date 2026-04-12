@@ -26,7 +26,7 @@ int startTime;
 boolean w, s, a, d, up, down, left, right;
 
 void setup() {
-  size(800, 600);
+  size(800, 800);
   oscP5 = new OscP5(this, 12000);
   receiverAddress = new NetAddress("127.0.0.1", 12001); // IP anpassen für Pi!
   initGame(); // Setzt Startpositionen
