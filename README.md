@@ -23,6 +23,7 @@ Die Evolution von *WeAre*. Spieler tragen VR-Headsets (Raspberry Pi) und UWB-Tag
 ### Headsets
 - **RaspberryPi:** 2x RaspberryPi ??
   - *Processing* für die Visualisierung
+  - Raspberry Pi with Desktop Raspian is easyier for the Visualisation stuff, no need for X11 etc.
 - **VR Screen:** 2x ??
 - **Microcontroller:** 2x Ai-Thinker UWB Technologie BU03 DW3000 Plan Kit Positionsgenauigkeit 10cm
 - **Powerbank:** 2x ??
