@@ -32,9 +32,12 @@ class GameVisualizer:
     def __init__(self):
         pygame.init()
         pygame.display.set_caption("WeAreU Game Visualizer")
+        pygame.mouse.set_visible(False)  
 
-        self.screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
         self.canvas = pygame.Surface((VIEWPORT_W, VIEWPORT_H))
+        
+        self.screen = pygame.display.set_mode((0,0), pygame.FULLSCREEN)
+       
         self.clock = pygame.time.Clock()
 
         self.font_small = pygame.font.SysFont(None, 18)
