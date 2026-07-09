@@ -4,6 +4,9 @@ import processing.serial.*;
 Serial serialPort;
 int serialPortIndex = 8;   // Change if needed after checking console output
 int serialBaud = 115200;
+int maxSerialLinesPerFrame = 40;
+int parseErrorCount = 0;
+int lastParseErrorMs = 0;
 
 // ---------- World / anchors (meters) ----------
 float[][] anchors = {
@@ -27,31 +30,43 @@ float autoFitPadding = 0.5;
 boolean swapXYCoordinates = true;
 
 // ---------- Live data ----------
-float tagX = Float.NaN;
-float tagY = Float.NaN;
-float tagXFiltered = Float.NaN;
-float tagYFiltered = Float.NaN;
-int anchorsUsed = 0;
-float[] d = {0, 0, 0, 0};
-boolean hasData = false;
+static final int MAX_TAGS = 2;
+float[] tagX = new float[MAX_TAGS];
+float[] tagY = new float[MAX_TAGS];
+float[] tagXFiltered = new float[MAX_TAGS];
+float[] tagYFiltered = new float[MAX_TAGS];
+int[] anchorsUsed = new int[MAX_TAGS];
+float[][] d = new float[MAX_TAGS][4];
+boolean[] hasData = new boolean[MAX_TAGS];
 
-// Trails
-ArrayList<PVector> rawTrail = new ArrayList<PVector>();
-ArrayList<PVector> filteredTrail = new ArrayList<PVector>();
+// Trails per tag
+ArrayList<PVector>[] rawTrail = new ArrayList[MAX_TAGS];
+ArrayList<PVector>[] filteredTrail = new ArrayList[MAX_TAGS];
 int maxTrail = 120;
 
 // ---------- Simple 2D Kalman ----------
-float[] kState = {0, 0, 0, 0}; // x, y, vx, vy
-float kP00 = 1.0;
-float kP11 = 1.0;
+float[][] kState = new float[MAX_TAGS][4];
+float[] kP00 = new float[MAX_TAGS];
+float[] kP11 = new float[MAX_TAGS];
 float kQ = 0.12;
 float kR = 1.1;
 float kDt = 0.10;
-boolean kalmanInitialized = false;
+boolean[] kalmanInitialized = new boolean[MAX_TAGS];
 
 void setup() {
   size(1200, 800);
   smooth(8);
+
+  for (int i = 0; i < MAX_TAGS; i++) {
+    tagX[i] = Float.NaN;
+    tagY[i] = Float.NaN;
+    tagXFiltered[i] = Float.NaN;
+    tagYFiltered[i] = Float.NaN;
+    kP00[i] = 1.0;
+    kP11[i] = 1.0;
+    rawTrail[i] = new ArrayList<PVector>();
+    filteredTrail[i] = new ArrayList<PVector>();
+  }
 
   println("Available serial ports:");
   printArray(Serial.list());
@@ -61,11 +76,18 @@ void setup() {
     return;
   }
 
-  serialPort = new Serial(this, Serial.list()[serialPortIndex], serialBaud);
-  serialPort.bufferUntil('\n');
+  int selectedIndex = serialPortIndex;
+  if (selectedIndex < 0 || selectedIndex >= Serial.list().length) {
+    selectedIndex = 0;
+  }
+
+  serialPort = new Serial(this, Serial.list()[selectedIndex], serialBaud);
+  serialPort.clear();
+  println("Using serial port: " + Serial.list()[selectedIndex]);
 }
 
 void draw() {
+  pollSerial(maxSerialLinesPerFrame);
   updateViewBounds();
   drawBackgroundGrid();
   drawAnchors();
@@ -103,17 +125,19 @@ void updateViewBounds() {
   }
 
   // Include current raw + filtered points in their original coordinate system.
-  if (!Float.isNaN(tagX) && !Float.isNaN(tagY)) {
-    minVX = min(minVX, tagX);
-    maxVX = max(maxVX, tagX);
-    minVY = min(minVY, tagY);
-    maxVY = max(maxVY, tagY);
-  }
-  if (!Float.isNaN(tagXFiltered) && !Float.isNaN(tagYFiltered)) {
-    minVX = min(minVX, tagXFiltered);
-    maxVX = max(maxVX, tagXFiltered);
-    minVY = min(minVY, tagYFiltered);
-    maxVY = max(maxVY, tagYFiltered);
+  for (int t = 0; t < MAX_TAGS; t++) {
+    if (!Float.isNaN(tagX[t]) && !Float.isNaN(tagY[t])) {
+      minVX = min(minVX, tagX[t]);
+      maxVX = max(maxVX, tagX[t]);
+      minVY = min(minVY, tagY[t]);
+      maxVY = max(maxVY, tagY[t]);
+    }
+    if (!Float.isNaN(tagXFiltered[t]) && !Float.isNaN(tagYFiltered[t])) {
+      minVX = min(minVX, tagXFiltered[t]);
+      maxVX = max(maxVX, tagXFiltered[t]);
+      minVY = min(minVY, tagYFiltered[t]);
+      maxVY = max(maxVY, tagYFiltered[t]);
+    }
   }
 
   // Keep a sensible minimum world size to avoid jittery zooming.
@@ -170,11 +194,11 @@ void drawAnchors() {
     float sy = worldToScreenY(py);
 
     // Range ring from current frame
-    if (hasData && d[i] > 0.0) {
+    if (hasData[0] && d[0][i] > 0.0) {
       noFill();
       stroke(70, 120, 220, 130);
       strokeWeight(1);
-      float radiusPx = metersToPixels(d[i]);
+      float radiusPx = metersToPixels(d[0][i]);
       ellipse(sx, sy, radiusPx * 2, radiusPx * 2);
     }
 
@@ -188,59 +212,66 @@ void drawAnchors() {
 }
 
 void drawTrails() {
-  if (rawTrail.size() >= 2) {
-    noFill();
-    stroke(255, 120, 120, 160);
-    strokeWeight(1.5);
-    beginShape();
-    for (PVector p : rawTrail) {
-      vertex(worldToScreenX(p.x), worldToScreenY(p.y));
+  int[][] rawColors    = {{255, 120, 120}, {120, 180, 255}};
+  int[][] filtColors   = {{120, 220, 120}, {220, 220, 80}};
+
+  for (int t = 0; t < MAX_TAGS; t++) {
+    if (rawTrail[t].size() >= 2) {
+      noFill();
+      stroke(rawColors[t][0], rawColors[t][1], rawColors[t][2], 160);
+      strokeWeight(1.5);
+      beginShape();
+      for (PVector p : rawTrail[t]) {
+        vertex(worldToScreenX(p.x), worldToScreenY(p.y));
+      }
+      endShape();
     }
-    endShape();
-  }
 
-  if (filteredTrail.size() < 2) {
-    return;
+    if (filteredTrail[t].size() >= 2) {
+      noFill();
+      stroke(filtColors[t][0], filtColors[t][1], filtColors[t][2], 180);
+      strokeWeight(2);
+      beginShape();
+      for (PVector p : filteredTrail[t]) {
+        vertex(worldToScreenX(p.x), worldToScreenY(p.y));
+      }
+      endShape();
+    }
   }
-
-  noFill();
-  stroke(120, 220, 120, 180);
-  strokeWeight(2);
-  beginShape();
-  for (PVector p : filteredTrail) {
-    vertex(worldToScreenX(p.x), worldToScreenY(p.y));
-  }
-  endShape();
 }
 
 void drawTags() {
-  if (hasData && !Float.isNaN(tagX) && !Float.isNaN(tagY)) {
-    float sx = worldToScreenX(tagX);
-    float sy = worldToScreenY(tagY);
+  int[][] rawColors  = {{255, 120, 120}, {120, 180, 255}};
+  int[][] filtColors = {{80, 255, 120}, {255, 240, 80}};
 
-    stroke(255, 120, 120);
-    strokeWeight(2);
-    fill(255, 120, 120);
-    ellipse(sx, sy, 12, 12);
-    line(sx - 8, sy, sx + 8, sy);
-    line(sx, sy - 8, sx, sy + 8);
+  for (int t = 0; t < MAX_TAGS; t++) {
+    if (hasData[t] && !Float.isNaN(tagX[t]) && !Float.isNaN(tagY[t])) {
+      float sx = worldToScreenX(tagX[t]);
+      float sy = worldToScreenY(tagY[t]);
+      stroke(rawColors[t][0], rawColors[t][1], rawColors[t][2]);
+      strokeWeight(2);
+      fill(rawColors[t][0], rawColors[t][1], rawColors[t][2]);
+      ellipse(sx, sy, 12, 12);
+      line(sx - 8, sy, sx + 8, sy);
+      line(sx, sy - 8, sx, sy + 8);
+    }
+
+    if (hasData[t] && !Float.isNaN(tagXFiltered[t]) && !Float.isNaN(tagYFiltered[t])) {
+      float sx = worldToScreenX(tagXFiltered[t]);
+      float sy = worldToScreenY(tagYFiltered[t]);
+      stroke(filtColors[t][0], filtColors[t][1], filtColors[t][2]);
+      strokeWeight(2);
+      fill(filtColors[t][0], filtColors[t][1], filtColors[t][2]);
+      ellipse(sx, sy, 14, 14);
+      stroke(filtColors[t][0], filtColors[t][1], filtColors[t][2], 180);
+      line(sx - 10, sy, sx + 10, sy);
+      line(sx, sy - 10, sx, sy + 10);
+      textAlign(CENTER, BOTTOM);
+      textSize(13);
+      fill(filtColors[t][0], filtColors[t][1], filtColors[t][2]);
+      text("T" + t, sx, sy - 12);
+    }
   }
-
-  if (!hasData || Float.isNaN(tagXFiltered) || Float.isNaN(tagYFiltered)) {
-    return;
-  }
-
-  float sx = worldToScreenX(tagXFiltered);
-  float sy = worldToScreenY(tagYFiltered);
-
-  stroke(80, 255, 120);
-  strokeWeight(2);
-  fill(80, 255, 120);
-  ellipse(sx, sy, 14, 14);
-
-  stroke(80, 255, 120, 180);
-  line(sx - 10, sy, sx + 10, sy);
-  line(sx, sy - 10, sx, sy + 10);
 }
 
 void drawHud() {
@@ -248,71 +279,84 @@ void drawHud() {
   textAlign(LEFT, TOP);
   textSize(15);
 
-  String posRaw = "Raw: n/a";
-  String posFiltered = "Filtered: n/a";
+  int[][] hudColors = {{255, 120, 120}, {120, 180, 255}};
 
-  if (hasData && !Float.isNaN(tagX) && !Float.isNaN(tagY)) {
-    posRaw = "Raw: (" + nf(tagX, 1, 3) + ", " + nf(tagY, 1, 3) + ") m";
-  }
-  if (hasData && !Float.isNaN(tagXFiltered) && !Float.isNaN(tagYFiltered)) {
-    posFiltered = "Filtered: (" + nf(tagXFiltered, 1, 3) + ", " + nf(tagYFiltered, 1, 3) + ") m";
+  for (int t = 0; t < MAX_TAGS; t++) {
+    int yOff = t * 44;
+    fill(hudColors[t][0], hudColors[t][1], hudColors[t][2]);
+    String raw = "T" + t + " raw: n/a";
+    String filt = "T" + t + " filt: n/a";
+    if (hasData[t] && !Float.isNaN(tagX[t]) && !Float.isNaN(tagY[t])) {
+      raw = "T" + t + " raw: (" + nf(tagX[t], 1, 3) + ", " + nf(tagY[t], 1, 3) + ") m";
+    }
+    if (hasData[t] && !Float.isNaN(tagXFiltered[t]) && !Float.isNaN(tagYFiltered[t])) {
+      filt = "T" + t + " filt: (" + nf(tagXFiltered[t], 1, 3) + ", " + nf(tagYFiltered[t], 1, 3) + ") m";
+    }
+    text(raw,  20, 12 + yOff);
+    text(filt, 20, 28 + yOff);
   }
 
-  fill(255, 120, 120);
-  text(posRaw, 20, 12);
-  fill(120, 255, 120);
-  text(posFiltered, 20, 34);
   fill(255);
-  text("Anchors used: " + anchorsUsed, 20, 56);
-  text("d0=" + nf(d[0], 1, 3) + "  d1=" + nf(d[1], 1, 3) + "  d2=" + nf(d[2], 1, 3) + "  d3=" + nf(d[3], 1, 3), 20, 78);
   text("view x:[" + nf(minX, 1, 2) + ", " + nf(maxX, 1, 2) + "] y:[" + nf(minY, 1, 2) + ", " + nf(maxY, 1, 2) + "]", 20, 100);
   text("anchorSwapXY=" + (swapXYCoordinates ? "on" : "off"), 20, 122);
 }
 
 void kalmanPredict() {
-  if (!kalmanInitialized) {
-    return;
+  for (int t = 0; t < MAX_TAGS; t++) {
+    if (!kalmanInitialized[t]) continue;
+    kState[t][0] += kState[t][2] * kDt;
+    kState[t][1] += kState[t][3] * kDt;
+    kP00[t] += kQ;
+    kP11[t] += kQ;
   }
-
-  kState[0] += kState[2] * kDt;
-  kState[1] += kState[3] * kDt;
-  kP00 += kQ;
-  kP11 += kQ;
 }
 
-void kalmanUpdate(float mx, float my) {
-  if (!kalmanInitialized) {
-    kState[0] = mx;
-    kState[1] = my;
-    kState[2] = 0;
-    kState[3] = 0;
-    kalmanInitialized = true;
+void kalmanUpdate(int t, float mx, float my) {
+  if (!kalmanInitialized[t]) {
+    kState[t][0] = mx;
+    kState[t][1] = my;
+    kState[t][2] = 0;
+    kState[t][3] = 0;
+    kalmanInitialized[t] = true;
     return;
   }
 
-  float kx = kP00 / (kP00 + kR);
-  float ky = kP11 / (kP11 + kR);
+  float kx = kP00[t] / (kP00[t] + kR);
+  float ky = kP11[t] / (kP11[t] + kR);
 
-  float prevX = kState[0];
-  float prevY = kState[1];
+  float prevX = kState[t][0];
+  float prevY = kState[t][1];
 
-  kState[0] = kState[0] + kx * (mx - kState[0]);
-  kState[1] = kState[1] + ky * (my - kState[1]);
+  kState[t][0] = kState[t][0] + kx * (mx - kState[t][0]);
+  kState[t][1] = kState[t][1] + ky * (my - kState[t][1]);
 
   if (kDt > 0) {
-    kState[2] = (kState[0] - prevX) / kDt;
-    kState[3] = (kState[1] - prevY) / kDt;
+    kState[t][2] = (kState[t][0] - prevX) / kDt;
+    kState[t][3] = (kState[t][1] - prevY) / kDt;
   }
 
-  kP00 = (1 - kx) * kP00;
-  kP11 = (1 - ky) * kP11;
+  kP00[t] = (1 - kx) * kP00[t];
+  kP11[t] = (1 - ky) * kP11[t];
 }
 
-void serialEvent(Serial p) {
-  String line = p.readStringUntil('\n');
-  if (line == null) {
+void pollSerial(int maxLines) {
+  if (serialPort == null) {
     return;
   }
+
+  int processed = 0;
+  while (serialPort.available() > 0 && processed < maxLines) {
+    String line = serialPort.readStringUntil('\n');
+    if (line == null) {
+      break;
+    }
+
+    parseSerialLine(line);
+    processed++;
+  }
+}
+
+void parseSerialLine(String line) {
 
   line = trim(line);
   if (line.length() == 0) {
@@ -320,63 +364,67 @@ void serialEvent(Serial p) {
   }
 
   // Ignore non-CSV diagnostic lines
-  if (line.startsWith("x,y,anchors_used") || line.startsWith("[status]") || line.startsWith("Header") || line.startsWith("Raw data") || line.startsWith("BS")) {
+  if (line.startsWith("tag,") || line.startsWith("[status]") || line.startsWith("Header") || line.startsWith("Raw data") || line.startsWith("BS")) {
     return;
   }
 
   String[] parts = split(line, ',');
-  if (parts.length < 7) {
+  if (parts.length < 8) {
     return;
   }
 
   try {
-    float x = parseFlexibleFloat(parts[0]);
-    float y = parseFlexibleFloat(parts[1]);
-    int used = int(parseFlexibleFloat(parts[2]));
+    int t = int(parseFlexibleFloat(parts[0]));
+    if (t < 0 || t >= MAX_TAGS) return;
 
-    float nd0 = parseFlexibleFloat(parts[3]);
-    float nd1 = parseFlexibleFloat(parts[4]);
-    float nd2 = parseFlexibleFloat(parts[5]);
-    float nd3 = parseFlexibleFloat(parts[6]);
+    float x    = parseFlexibleFloat(parts[1]);
+    float y    = parseFlexibleFloat(parts[2]);
+    int used   = int(parseFlexibleFloat(parts[3]));
 
-    tagX = x;
-    tagY = y;
-    anchorsUsed = used;
-    d[0] = nd0;
-    d[1] = nd1;
-    d[2] = nd2;
-    d[3] = nd3;
-    hasData = true;
+    d[t][0] = parseFlexibleFloat(parts[4]);
+    d[t][1] = parseFlexibleFloat(parts[5]);
+    d[t][2] = parseFlexibleFloat(parts[6]);
+    d[t][3] = parseFlexibleFloat(parts[7]);
 
-    if (!Float.isNaN(tagX) && !Float.isNaN(tagY)) {
+    tagX[t] = x;
+    tagY[t] = y;
+    anchorsUsed[t] = used;
+    hasData[t] = true;
+
+    if (!Float.isNaN(tagX[t]) && !Float.isNaN(tagY[t])) {
       kalmanPredict();
-      kalmanUpdate(tagX, tagY);
-      tagXFiltered = kState[0];
-      tagYFiltered = kState[1];
+      kalmanUpdate(t, tagX[t], tagY[t]);
+      tagXFiltered[t] = kState[t][0];
+      tagYFiltered[t] = kState[t][1];
     } else {
       kalmanPredict();
-      if (kalmanInitialized) {
-        tagXFiltered = kState[0];
-        tagYFiltered = kState[1];
+      if (kalmanInitialized[t]) {
+        tagXFiltered[t] = kState[t][0];
+        tagYFiltered[t] = kState[t][1];
       }
     }
 
-    if (!Float.isNaN(tagX) && !Float.isNaN(tagY)) {
-      rawTrail.add(new PVector(tagX, tagY));
-      while (rawTrail.size() > maxTrail) {
-        rawTrail.remove(0);
+    if (!Float.isNaN(tagX[t]) && !Float.isNaN(tagY[t])) {
+      rawTrail[t].add(new PVector(tagX[t], tagY[t]));
+      while (rawTrail[t].size() > maxTrail) {
+        rawTrail[t].remove(0);
       }
     }
 
-    if (!Float.isNaN(tagXFiltered) && !Float.isNaN(tagYFiltered)) {
-      filteredTrail.add(new PVector(tagXFiltered, tagYFiltered));
-      while (filteredTrail.size() > maxTrail) {
-        filteredTrail.remove(0);
+    if (!Float.isNaN(tagXFiltered[t]) && !Float.isNaN(tagYFiltered[t])) {
+      filteredTrail[t].add(new PVector(tagXFiltered[t], tagYFiltered[t]));
+      while (filteredTrail[t].size() > maxTrail) {
+        filteredTrail[t].remove(0);
       }
     }
   }
   catch (Exception ex) {
-    println("Parse error: " + line);
+    parseErrorCount++;
+    int now = millis();
+    if (now - lastParseErrorMs > 1000) {
+      lastParseErrorMs = now;
+      println("Parse errors: " + parseErrorCount + " (latest line omitted)");
+    }
   }
 }
 

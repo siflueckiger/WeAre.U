@@ -1,5 +1,13 @@
 #include <Arduino.h>
 
+static const int MAX_ANCHORS = 8;
+static const int MEDIAN_WINDOW = 5;
+
+static const float DIST_MIN_M = 0.05f;
+static const float DIST_MAX_M = 30.0f;
+static const float SPIKE_CLAMP_M = 0.80f;
+static const float EMA_ALPHA = 0.25f;
+
 static const uint32_t USB_BAUD = 115200;
 static const uint32_t BU03_BAUD = 115200;
 
@@ -16,9 +24,79 @@ static uint32_t skippedUntilHeader = 0;
 static unsigned long lastRxMs = 0;
 static unsigned long lastStatusMs = 0;
 
+static float filterHistory[MAX_ANCHORS][MEDIAN_WINDOW];
+static int filterCount[MAX_ANCHORS] = {0};
+static int filterWriteIdx[MAX_ANCHORS] = {0};
+static float filterEma[MAX_ANCHORS] = {0.0f};
+static bool filterEmaValid[MAX_ANCHORS] = {false};
+
+float medianInPlace(float *values, int n) {
+  for (int i = 1; i < n; i++) {
+    float key = values[i];
+    int j = i - 1;
+    while (j >= 0 && values[j] > key) {
+      values[j + 1] = values[j];
+      j--;
+    }
+    values[j + 1] = key;
+  }
+
+  if ((n & 1) == 1) {
+    return values[n / 2];
+  }
+  return 0.5f * (values[n / 2 - 1] + values[n / 2]);
+}
+
+bool smoothDistance(int anchorIdx, float rawDistance, float &smoothedDistance) {
+  if (anchorIdx < 0 || anchorIdx >= MAX_ANCHORS) {
+    return false;
+  }
+
+  if (!(rawDistance >= DIST_MIN_M && rawDistance <= DIST_MAX_M)) {
+    filterCount[anchorIdx] = 0;
+    filterWriteIdx[anchorIdx] = 0;
+    filterEmaValid[anchorIdx] = false;
+    return false;
+  }
+
+  float sample = rawDistance;
+  if (filterEmaValid[anchorIdx]) {
+    float delta = sample - filterEma[anchorIdx];
+    if (delta > SPIKE_CLAMP_M) {
+      sample = filterEma[anchorIdx] + SPIKE_CLAMP_M;
+    } else if (delta < -SPIKE_CLAMP_M) {
+      sample = filterEma[anchorIdx] - SPIKE_CLAMP_M;
+    }
+  }
+
+  int wi = filterWriteIdx[anchorIdx];
+  filterHistory[anchorIdx][wi] = sample;
+  filterWriteIdx[anchorIdx] = (wi + 1) % MEDIAN_WINDOW;
+  if (filterCount[anchorIdx] < MEDIAN_WINDOW) {
+    filterCount[anchorIdx]++;
+  }
+
+  float tmp[MEDIAN_WINDOW];
+  int n = filterCount[anchorIdx];
+  for (int i = 0; i < n; i++) {
+    tmp[i] = filterHistory[anchorIdx][i];
+  }
+  float med = medianInPlace(tmp, n);
+
+  if (!filterEmaValid[anchorIdx]) {
+    filterEma[anchorIdx] = med;
+    filterEmaValid[anchorIdx] = true;
+  } else {
+    filterEma[anchorIdx] += EMA_ALPHA * (med - filterEma[anchorIdx]);
+  }
+
+  smoothedDistance = filterEma[anchorIdx];
+  return true;
+}
+
 bool decodeUwbDistances(uint8_t *data, int dataLen, float *distances) {
   // Initialize all distances to -1 (equivalent to None)
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < MAX_ANCHORS; i++) {
     distances[i] = -1.0f;
   }
 
@@ -33,16 +111,14 @@ bool decodeUwbDistances(uint8_t *data, int dataLen, float *distances) {
   }
 
   // Extract distance data (skip header, process 4-byte chunks)
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < MAX_ANCHORS; i++) {
     int byteOffset = 3 + (i * 4);
-    if (byteOffset + 3 < dataLen) {
-      uint32_t distanceRaw = ((uint32_t)data[byteOffset]) |
-                             ((uint32_t)data[byteOffset + 1] << 8) |
-                             ((uint32_t)data[byteOffset + 2] << 16) |
-                             ((uint32_t)data[byteOffset + 3] << 24);
+    if (byteOffset + 1 < dataLen) {
+      uint16_t distanceRawMm = ((uint16_t)data[byteOffset]) |
+                               ((uint16_t)data[byteOffset + 1] << 8);
 
-      if (distanceRaw > 0) {
-        distances[i] = distanceRaw / 1000.0f;
+      if (distanceRawMm > 0) {
+        distances[i] = distanceRawMm / 1000.0f;
       }
     }
   }
@@ -50,7 +126,7 @@ bool decodeUwbDistances(uint8_t *data, int dataLen, float *distances) {
   return true;
 }
 
-void printDistances(float *distances, bool validData) {
+void printDistances(float *rawDistances, float *smoothedDistances, bool validData) {
   if (!validData) {
     Serial.println("Invalid data received");
     return;
@@ -59,12 +135,19 @@ void printDistances(float *distances, bool validData) {
   for (int i = 0; i <= 3; i++) {
     Serial.print("BS");
     Serial.print(i);
-    Serial.print(": ");
-    if (distances[i] > 0) {
-      Serial.print(distances[i], 3);
+    Serial.print(" raw=");
+    if (rawDistances[i] > 0) {
+      Serial.print(rawDistances[i], 3);
+    } else {
+      Serial.print("NA");
+    }
+
+    Serial.print("m smooth=");
+    if (smoothedDistances[i] > 0) {
+      Serial.print(smoothedDistances[i], 3);
       Serial.println("m");
     } else {
-      Serial.println("Not visible");
+      Serial.println("NA");
     }
   }
   Serial.println("------------------------------");
@@ -124,9 +207,19 @@ void loop() {
         }
         Serial.println("'");
 
-        float distances[8];
-        bool validData = decodeUwbDistances(buffer, bufferIndex, distances);
-        printDistances(distances, validData);
+        float rawDistances[MAX_ANCHORS];
+        bool validData = decodeUwbDistances(buffer, bufferIndex, rawDistances);
+
+        float smoothedDistances[MAX_ANCHORS];
+        for (int i = 0; i < MAX_ANCHORS; i++) {
+          smoothedDistances[i] = -1.0f;
+          float out = -1.0f;
+          if (smoothDistance(i, rawDistances[i], out)) {
+            smoothedDistances[i] = out;
+          }
+        }
+
+        printDistances(rawDistances, smoothedDistances, validData);
 
         messageStarted = false;
         bufferIndex = 0;
