@@ -2,6 +2,30 @@
 
 // -----------------------------
 // Serial config
+/*
+
+rame #170 | header=AA 25 1
+  Rohdaten je Slot (ungefiltert):
+    S0: 1400 mm | 1.400 m | bytes=78 5 0 0
+    S1: 3160 mm | 3.160 m | bytes=58 C 0 0
+    S2: 5300 mm | 5.300 m | bytes=B4 14 0 0
+    S3: 4790 mm | 4.790 m | bytes=B6 12 0 0
+    S4: 0 mm | 0.000 m | bytes=0 0 0 0
+    S5: 0 mm | 0.000 m | bytes=0 0 0 0
+    S6: 0 mm | 0.000 m | bytes=0 0 0 0
+    S7: 0 mm | 0.000 m | bytes=0 0 0 0
+
+Frame #171 | header=AA 25 1
+  Rohdaten je Slot (ungefiltert):
+    S0: 1360 mm | 1.360 m | bytes=50 5 0 0
+    S1: 3110 mm | 3.110 m | bytes=26 C 0 0
+    S2: 5230 mm | 5.230 m | bytes=6E 14 0 0
+    S3: 4840 mm | 4.840 m | bytes=E8 12 0 0
+    S4: 0 mm | 0.000 m | bytes=0 0 0 0
+    S5: 0 mm | 0.000 m | bytes=0 0 0 0
+    S6: 0 mm | 0.000 m | bytes=0 0 0 0
+    S7: 0 mm | 0.000 m | bytes=0 0 0 0
+*/
 // -----------------------------
 static const uint32_t USB_BAUD  = 115200;
 static const uint32_t BU03_BAUD = 115200;
@@ -13,64 +37,46 @@ static const int BU03_TX_PIN = 17;
 
 HardwareSerial bu03Uart(2);
 
-// -----------------------------
-// Raw passthrough + optional frame decode
-// All bytes are forwarded immediately.
-// Binary frames (0xAA) are additionally decoded.
-// -----------------------------
 static const int FRAME_LEN = 35;
-static uint8_t  frameBuf[FRAME_LEN];
-static int      frameIdx   = 0;
-static bool     inFrame    = false;
-
+static uint8_t frameBuf[FRAME_LEN];
+static int frameIdx = 0;
+static bool inFrame = false;
 static uint32_t frameCount = 0;
-static uint32_t byteCount  = 0;
 
 void printFrameDecode(const uint8_t *buf, int len) {
   frameCount++;
-  Serial.print("\n--- Frame #");
+  Serial.print("Frame #");
   Serial.print(frameCount);
-  Serial.print(" (");
-  Serial.print(len);
-  Serial.println(" bytes) ---");
+  Serial.print(" | header=");
+  Serial.print(buf[0], HEX);
+  Serial.print(" ");
+  Serial.print(buf[1], HEX);
+  Serial.print(" ");
+  Serial.print(buf[2], HEX);
+  Serial.println();
 
-  // Hex dump, 8 bytes per row
-  for (int i = 0; i < len; i++) {
-    if (i % 8 == 0) {
-      Serial.print("  ");
-      char addr[6];
-      sprintf(addr, "[%02d] ", i);
-      Serial.print(addr);
-    }
-    char hex[4];
-    sprintf(hex, "%02X ", buf[i]);
-    Serial.print(hex);
-    if ((i + 1) % 8 == 0 || i == len - 1) {
-      Serial.println();
-    }
-  }
-
-  // Decoded distance slots
-  Serial.println("  Distances (16-bit LE mm -> m):");
+  Serial.println("  Rohdaten je Slot (ungefiltert):");
   for (int i = 0; i < 8; i++) {
     int off = 3 + i * 4;
     if (off + 1 >= len) break;
+
     uint16_t rawMm = (uint16_t)buf[off] | ((uint16_t)buf[off + 1] << 8);
-    Serial.print("    Slot ");
+    Serial.print("    S");
     Serial.print(i);
     Serial.print(": ");
-    if (rawMm > 0) {
-      Serial.print(rawMm);
-      Serial.print(" mm = ");
-      Serial.print(rawMm / 1000.0f, 3);
-      Serial.print(" m  | raw bytes: ");
-      char b[18];
-      sprintf(b, "%02X %02X %02X %02X", buf[off], buf[off+1], buf[off+2], buf[off+3]);
-      Serial.println(b);
-    } else {
-      Serial.println("(inactive)");
-    }
+    Serial.print(rawMm);
+    Serial.print(" mm | ");
+    Serial.print(rawMm / 1000.0f, 3);
+    Serial.print(" m | bytes=");
+    Serial.print(buf[off], HEX);
+    Serial.print(" ");
+    Serial.print(buf[off + 1], HEX);
+    Serial.print(" ");
+    Serial.print(buf[off + 2], HEX);
+    Serial.print(" ");
+    Serial.println(buf[off + 3], HEX);
   }
+  Serial.println();
 }
 
 void setup() {
@@ -82,53 +88,36 @@ void setup() {
   Serial.print("RX pin: "); Serial.println(BU03_RX_PIN);
   Serial.print("TX pin: "); Serial.println(BU03_TX_PIN);
   Serial.print("Baud:   "); Serial.println(BU03_BAUD);
-  Serial.println("Waiting for frames (header=0xAA)...");
+  Serial.println("Readable decode mode active (AA + 35-byte frame)");
 }
 
 void loop() {
+  // BU03 -> decoded frame output
   while (bu03Uart.available()) {
     uint8_t b = (uint8_t)bu03Uart.read();
-    byteCount++;
 
-    // --- 1) Raw passthrough: alle Bytes sofort weiterleiten ---
-    // Druckbare ASCII-Zeichen direkt ausgeben, Binär als \xHH
-    if (b >= 0x20 && b <= 0x7E) {
-      Serial.write(b);
-    } else if (b == '\n' || b == '\r') {
-      Serial.write(b);
-    } else {
-      // Binär-Byte als \xHH markieren, damit man 0xAA-Frames sieht
-      char hex[6];
-      sprintf(hex, "\\x%02X", b);
-      Serial.print(hex);
-    }
-
-    // --- 2) Parallel: 0xAA-Frames erkennen und dekodieren ---
     if (!inFrame) {
       if (b == 0xAA) {
-        inFrame  = true;
+        inFrame = true;
         frameIdx = 0;
         frameBuf[frameIdx++] = b;
       }
-    } else {
-      if (frameIdx < FRAME_LEN) {
-        frameBuf[frameIdx++] = b;
-      }
-      if (frameIdx >= FRAME_LEN) {
-        printFrameDecode(frameBuf, FRAME_LEN);
-        inFrame  = false;
-        frameIdx = 0;
-      }
+      continue;
+    }
+
+    if (frameIdx < FRAME_LEN) {
+      frameBuf[frameIdx++] = b;
+    }
+
+    if (frameIdx >= FRAME_LEN) {
+      printFrameDecode(frameBuf, FRAME_LEN);
+      inFrame = false;
+      frameIdx = 0;
     }
   }
 
-  // Status alle 5 Sekunden wenn keine Daten kommen
-  static unsigned long lastStatus = 0;
-  if (millis() - lastStatus > 5000) {
-    lastStatus = millis();
-    Serial.print("\n[status] bytes=");
-    Serial.print(byteCount);
-    Serial.print(" frames=");
-    Serial.println(frameCount);
+  // USB serial monitor -> BU03 (for AT commands)
+  while (Serial.available()) {
+    bu03Uart.write((uint8_t)Serial.read());
   }
 }
