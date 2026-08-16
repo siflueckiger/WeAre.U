@@ -1,3 +1,4 @@
+import os
 import threading
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import BlockingOSCUDPServer
@@ -22,6 +23,10 @@ STALE_MS = 2000         # warn if no packets for this long
 
 MARGIN = 30             # px margin inside each eye viewport
 EYE_OFFSET_MM = 150     # horizontal parallax per eye in mm (0 = no stereo)
+
+# Rotate image 180 deg if display is mounted upside down.
+# Override: BU03_FLIP_180=0 python bu03_vr_receiver.py
+FLIP_180 = os.environ.get("BU03_FLIP_180", "1") == "1"
 # ================================================================
 
 tags = {}
@@ -199,12 +204,17 @@ def main():
                 running = False
         w, h = screen.get_size()
         eye_w = w // 2
-        left = screen.subsurface(pygame.Rect(0, 0, eye_w, h))
-        right = screen.subsurface(pygame.Rect(eye_w, 0, eye_w, h))
+        left = pygame.Surface((eye_w, h))
+        right = pygame.Surface((eye_w, h))
         s, ox, oy = update_transform(eye_w, h)
         off = EYE_OFFSET_MM * s
         render_eye(left, s, ox + off, oy, draw_hud_flag=True)
         render_eye(right, s, ox - off, oy, draw_hud_flag=False)
+        if FLIP_180:
+            left = pygame.transform.flip(left, True, True)
+            right = pygame.transform.flip(right, True, True)
+        screen.blit(left, (0, 0))
+        screen.blit(right, (eye_w, 0))
         pygame.draw.line(screen, (60, 60, 60), (eye_w, 0), (eye_w, h), 2)
         pygame.display.flip()
         clock.tick(60)
