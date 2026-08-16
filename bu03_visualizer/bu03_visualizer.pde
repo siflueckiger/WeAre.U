@@ -1,5 +1,7 @@
 import processing.serial.*;
 import java.util.*;
+import oscP5.*;
+import netP5.*;
 
 // ============================ CONFIG ============================
 String PORT_HINT = "usbmodem";   // substring to auto-find the port (Serial.list())
@@ -24,6 +26,12 @@ boolean USE_EMA         = true;  // exponential smoothing on X/Y
 
 float MAX_SPEED_MM_S = 4200;     // 10 km/h * 1.5 safety factor
 float SMOOTH_ALPHA   = 0.30;     // 0 = frozen, 1 = unfiltered
+
+// OSC out (Raspberry Pi VR headset receiver)
+boolean OSC_ENABLED = true;
+String  OSC_TARGET_IP   = "192.168.1.100";  // FILL IN: Pi IP
+int     OSC_TARGET_PORT = 8000;
+int     OSC_LOCAL_PORT  = 12000;            // unused listen port (required by oscP5)
 // ================================================================
 
 static final byte[] HEAD = { 'C', 'm', 'd', 'M', ':', '4' };
@@ -39,11 +47,18 @@ HashSet<Integer> seenIds = new HashSet<Integer>();
 int frames = 0;
 long lastFrameMs = 0;
 
+OscP5 osc;
+NetAddress piAddr;
+int oscSent = 0;
+
 float s = 1, ox = 0, oy = 0;
 
 void setup() {
   size(1000, 800);
   trySerial();
+  osc = new OscP5(this, OSC_LOCAL_PORT);
+  piAddr = new NetAddress(OSC_TARGET_IP, OSC_TARGET_PORT);
+  println("OSC -> " + OSC_TARGET_IP + ":" + OSC_TARGET_PORT);
 }
 
 void draw() {
@@ -120,8 +135,19 @@ void handleFrame(Frame f) {
       t.trail.add(t.pos.copy());
       if (t.trail.size() > TRAIL_MAX) t.trail.remove(0);
       t.lastFixMs = now;
+      sendPos(f.tagid, t.pos.x, t.pos.y);
     }
   }
+}
+
+void sendPos(int tagid, float x, float y) {
+  if (!OSC_ENABLED) return;
+  OscMessage m = new OscMessage("/pos");
+  m.add(tagid);
+  m.add(x);
+  m.add(y);
+  osc.send(m, piAddr);
+  oscSent++;
 }
 
 void keyPressed() {
@@ -291,6 +317,7 @@ void drawHud() {
   y += 56;
   hudTag(y, TAG1_ID, "T1", C_T1);
   fill(150);
+  text("OSC: " + (OSC_ENABLED ? "ON -> " + OSC_TARGET_IP + ":" + OSC_TARGET_PORT + "  sent: " + oscSent : "OFF"), 10, height - 36);
   text("scale: " + nf(s, 0, 3) + " px/mm  |  grid: 500 mm", 10, height - 18);
 }
 
