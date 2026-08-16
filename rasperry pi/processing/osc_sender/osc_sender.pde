@@ -27,7 +27,7 @@ void setup() {
   size(600, 600);
   oscP5 = new OscP5(this, 12000);
   // IP des Empfängers (z.B. Raspberry Pi oder VR-Brille) eintragen
-  receiverAddress = new NetAddress("127.0.0.1", 12001); 
+  receiverAddress = new NetAddress("192.168.1.104", 12000); 
   initGame(); 
 }
 
