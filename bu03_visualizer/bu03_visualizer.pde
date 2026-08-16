@@ -17,6 +17,13 @@ int TAG1_ID = 0x0001;
 int TRAIL_MAX = 60;              // history points per tag
 color C_T0 = color(0, 200, 255);
 color C_T1 = color(255, 150, 40);
+
+// Smoothing filters -- toggle live with keys 1/2, key 4 cycles alpha
+boolean USE_SPEED_CLAMP = true;  // limit position jumps to MAX_SPEED_MM_S
+boolean USE_EMA         = true;  // exponential smoothing on X/Y
+
+float MAX_SPEED_MM_S = 4200;     // 10 km/h * 1.5 safety factor
+float SMOOTH_ALPHA   = 0.30;     // 0 = frozen, 1 = unfiltered
 // ================================================================
 
 static final byte[] HEAD = { 'C', 'm', 'd', 'M', ':', '4' };
@@ -91,12 +98,50 @@ void handleFrame(Frame f) {
   if (f.tagid == TAG0_ID || f.tagid == TAG1_ID) {
     PVector p = trilaterate(t);
     if (p != null) {
-      t.pos = p;
-      t.trail.add(p.copy());
+      long now = millis();
+      boolean first = (t.pos == null || t.lastFixMs == 0);
+      if (!first && USE_SPEED_CLAMP) {
+        float dt = (now - t.lastFixMs) / 1000.0f;
+        float maxD = MAX_SPEED_MM_S * max(dt, 0.02f);
+        float dx = p.x - t.pos.x, dy = p.y - t.pos.y;
+        float d = sqrt(dx * dx + dy * dy);
+        if (d > maxD) p = new PVector(t.pos.x + dx / d * maxD, t.pos.y + dy / d * maxD);
+      }
+      PVector oldPos = t.pos;
+      if (!first && USE_EMA) {
+        t.pos = new PVector(lerp(t.pos.x, p.x, SMOOTH_ALPHA), lerp(t.pos.y, p.y, SMOOTH_ALPHA));
+      } else {
+        t.pos = p;
+      }
+      if (!first) {
+        float dt = (now - t.lastFixMs) / 1000.0f;
+        if (dt > 0) t.speedMs = PVector.dist(oldPos, t.pos) / dt;
+      }
+      t.trail.add(t.pos.copy());
       if (t.trail.size() > TRAIL_MAX) t.trail.remove(0);
-      t.lastFixMs = millis();
+      t.lastFixMs = now;
     }
   }
+}
+
+void keyPressed() {
+  if (key == '1') {
+    USE_SPEED_CLAMP = !USE_SPEED_CLAMP;
+    println("Speed clamp: " + onOff(USE_SPEED_CLAMP));
+  } else if (key == '2') {
+    USE_EMA = !USE_EMA;
+    println("EMA: " + onOff(USE_EMA));
+  } else if (key == '4') {
+    if (SMOOTH_ALPHA < 0.25f) SMOOTH_ALPHA = 0.30f;
+    else if (SMOOTH_ALPHA < 0.40f) SMOOTH_ALPHA = 0.50f;
+    else if (SMOOTH_ALPHA < 0.65f) SMOOTH_ALPHA = 0.80f;
+    else SMOOTH_ALPHA = 0.15f;
+    println("EMA alpha: " + SMOOTH_ALPHA);
+  }
+}
+
+String onOff(boolean b) {
+  return b ? "ON" : "OFF";
 }
 
 PVector trilaterate(TagData t) {
@@ -212,6 +257,9 @@ void drawTag(int id, color c, String label) {
 void drawHud() {
   textAlign(LEFT, TOP);
   int y = 10;
+  fill(180, 230, 180);
+  text("Filters: Clamp[" + onOff(USE_SPEED_CLAMP) + "]  EMA[" + onOff(USE_EMA) + " a=" + nf(SMOOTH_ALPHA, 0, 2) + "]  |  keys: 1/2 toggle, 4 = alpha", 10, y);
+  y += 18;
   if (port == null) {
     fill(255, 120, 120);
     text("Serial: NOT CONNECTED (looking for port containing \"" + PORT_HINT + "\")", 10, y);
@@ -256,7 +304,7 @@ void hudTag(int y, int id, String label, color c) {
     return;
   }
   String pos = (t.pos != null)
-    ? "pos=(" + nf(t.pos.x, 0, 0) + ", " + nf(t.pos.y, 0, 0) + ") mm"
+    ? "pos=(" + nf(t.pos.x, 0, 0) + ", " + nf(t.pos.y, 0, 0) + ") mm  v=" + nf(t.speedMs / 1000.0f, 0, 2) + " m/s"
     : "pos=-- (no fix, <3 valid distances)";
   text("tagid=0x" + hex(t.id, 4) + "  " + pos + "  mask=" + binary(t.mask, 8), 40, y);
   String d = "  ";
@@ -272,6 +320,7 @@ class TagData {
   int id;
   int mask;
   int[] kalman = new int[8];
+  float speedMs;
   PVector pos;
   long lastFixMs;
   ArrayList<PVector> trail = new ArrayList<PVector>();
