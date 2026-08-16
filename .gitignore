@@ -53,3 +53,9 @@ logs/
 .cache/
 tmp/
 temp/
+
+## ========================
+# grosse Dateien
+# ========================
+
+BU03/references/
