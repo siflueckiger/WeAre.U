@@ -29,7 +29,7 @@ float SMOOTH_ALPHA   = 0.30;     // 0 = frozen, 1 = unfiltered
 
 // OSC out (Raspberry Pi VR headset receiver)
 boolean OSC_ENABLED = true;
-String  OSC_TARGET_IP   = "192.168.1.100";  // FILL IN: Pi IP
+String  OSC_TARGET_IP   = "192.168.1.104";  // FILL IN: Pi IP
 int     OSC_TARGET_PORT = 8000;
 int     OSC_LOCAL_PORT  = 12000;            // unused listen port (required by oscP5)
 // ================================================================
@@ -55,10 +55,16 @@ float s = 1, ox = 0, oy = 0;
 
 void setup() {
   size(1000, 800);
+  try {
+    osc = new OscP5(this, OSC_LOCAL_PORT);
+    piAddr = new NetAddress(OSC_TARGET_IP, OSC_TARGET_PORT);
+    println("OSC -> " + OSC_TARGET_IP + ":" + OSC_TARGET_PORT);
+  } catch (Exception e) {
+    osc = null;
+    piAddr = null;
+    println("OSC init failed (disabled): " + e.getMessage());
+  }
   trySerial();
-  osc = new OscP5(this, OSC_LOCAL_PORT);
-  piAddr = new NetAddress(OSC_TARGET_IP, OSC_TARGET_PORT);
-  println("OSC -> " + OSC_TARGET_IP + ":" + OSC_TARGET_PORT);
 }
 
 void draw() {
@@ -92,11 +98,15 @@ void trySerial() {
 }
 
 void serialEvent(Serial p) {
-  byte[] data = p.readBytes();
-  if (data == null || data.length == 0) return;
-  parser.push(data);
-  Frame f;
-  while ((f = parser.next()) != null) handleFrame(f);
+  try {
+    byte[] data = p.readBytes();
+    if (data == null || data.length == 0) return;
+    parser.push(data);
+    Frame f;
+    while ((f = parser.next()) != null) handleFrame(f);
+  } catch (Exception e) {
+    println("serialEvent error: " + e);
+  }
 }
 
 void handleFrame(Frame f) {
@@ -141,7 +151,7 @@ void handleFrame(Frame f) {
 }
 
 void sendPos(int tagid, float x, float y) {
-  if (!OSC_ENABLED) return;
+  if (!OSC_ENABLED || osc == null || piAddr == null) return;
   OscMessage m = new OscMessage("/pos");
   m.add(tagid);
   m.add(x);
