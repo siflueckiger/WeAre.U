@@ -15,10 +15,13 @@ C_T0 = (0, 200, 255)
 C_T1 = (255, 150, 40)
 
 FULLSCREEN = True       # False -> fixed window (debug on desktop)
-WINDOW_W = 1280
-WINDOW_H = 720
+WINDOW_W = 800          # VR headset screen size (split into left/right eye)
+WINDOW_H = 480
 
 STALE_MS = 2000         # warn if no packets for this long
+
+MARGIN = 30             # px margin inside each eye viewport
+EYE_OFFSET_MM = 150     # horizontal parallax per eye in mm (0 = no stereo)
 # ================================================================
 
 tags = {}
@@ -80,8 +83,7 @@ def update_transform(surface_w, surface_h):
         world_w = 1000
     if world_h < 1:
         world_h = 1000
-    margin = 80
-    s = min((surface_w - 2 * margin) / world_w, (surface_h - 2 * margin) / world_h)
+    s = min((surface_w - 2 * MARGIN) / world_w, (surface_h - 2 * MARGIN) / world_h)
     ox = (surface_w - world_w * s) / 2 - min_x * s
     oy = (surface_h + world_h * s) / 2 + min_y * s
     return s, ox, oy
@@ -119,17 +121,16 @@ def draw_anchors(surface, s, ox, oy):
         surface.blit(label, label.get_rect(center=(p[0], p[1] - 10)))
 
 
-def draw_tag(surface, tag_id, color, label, s, ox, oy):
-    t = tags[tag_id]
+def draw_tag(surface, layer, tag_id, color, label, s, ox, oy):
+    t = tags.get(tag_id)
+    if t is None:
+        return
     if len(t.trail) >= 2:
         for i in range(1, len(t.trail)):
             a = scr(t.trail[i - 1][0], t.trail[i - 1][1], s, ox, oy)
             b = scr(t.trail[i][0], t.trail[i][1], s, ox, oy)
             f = int(15 + (i - 1) * (200 - 15) / max(1, len(t.trail) - 2))
-            trail_color = (*color, f)
-            layer = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-            pygame.draw.line(layer, trail_color, a, b, 2)
-            surface.blit(layer, (0, 0))
+            pygame.draw.line(layer, (*color, f), a, b, 2)
     if t.pos is not None:
         p = scr(t.pos[0], t.pos[1], s, ox, oy)
         pygame.draw.circle(surface, color, p, 7)
@@ -162,6 +163,20 @@ def draw_hud(surface, s):
     )
 
 
+def render_eye(surface, s, ox, oy, draw_hud_flag):
+    surface.fill((22, 22, 22))
+    draw_grid(surface, s, ox, oy)
+    draw_anchors(surface, s, ox, oy)
+    layer = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+    for tag_id in tags:
+        color = tag_color(tag_id)
+        label = "T0" if tag_id == 0x0000 else ("T1" if tag_id == 0x0001 else f"0x{tag_id:04X}")
+        draw_tag(surface, layer, tag_id, color, label, s, ox, oy)
+    surface.blit(layer, (0, 0))
+    if draw_hud_flag:
+        draw_hud(surface, s)
+
+
 def main():
     global font, font_small
     pygame.init()
@@ -182,15 +197,15 @@ def main():
                 running = False
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 running = False
-        s, ox, oy = update_transform(screen.get_width(), screen.get_height())
-        screen.fill((22, 22, 22))
-        draw_grid(screen, s, ox, oy)
-        draw_anchors(screen, s, ox, oy)
-        for tag_id in tags:
-            color = tag_color(tag_id)
-            label = "T0" if tag_id == 0x0000 else ("T1" if tag_id == 0x0001 else f"0x{tag_id:04X}")
-            draw_tag(screen, tag_id, color, label, s, ox, oy)
-        draw_hud(screen, s)
+        w, h = screen.get_size()
+        eye_w = w // 2
+        left = screen.subsurface(pygame.Rect(0, 0, eye_w, h))
+        right = screen.subsurface(pygame.Rect(eye_w, 0, eye_w, h))
+        s, ox, oy = update_transform(eye_w, h)
+        off = EYE_OFFSET_MM * s
+        render_eye(left, s, ox + off, oy, draw_hud_flag=True)
+        render_eye(right, s, ox - off, oy, draw_hud_flag=False)
+        pygame.draw.line(screen, (60, 60, 60), (eye_w, 0), (eye_w, h), 2)
         pygame.display.flip()
         clock.tick(60)
     pygame.quit()
