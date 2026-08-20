@@ -1,5 +1,37 @@
 # WeAre.U Projektlog
 
+## 20.08.2026 – Agent-Session (Repo-Cleanup & Restrukturierung)
+
+### Goal
+Repo bereinigen und sauber strukturieren: veraltete Prototypen und Build-Artefakte löschen, Code-Ordner rollenbasiert benennen, OSC-Protokoll zentral dokumentieren.
+
+### Branches
+- `agent/repo-cleanup` – Deletions + Renames, gemergt nach `main` und gepusht
+
+### Files Changed
+- Gelöscht (veraltet / überflüssig):
+  - `rasperry pi/` – alter April-Prototyp (Processing-GameVisualizer, alte Pygame-Version); das OSC-Protokoll wurde daraus übernommen
+  - `bu03_vr_receiver_processing/` – alter Processing-Receiver, versteht das neue Protokoll nicht mehr
+  - Alte BU03-ESP32-Sketches (`AT-Anchor-*`, `AT-CmdM4-*`, `AT-Tag-Config*`) + alter UWB-2D-Visualizer inkl. `.autosave`-Dateien
+  - Obsidian-Canvas-Versionen (`WeAre3.0*.canvas`), Tutorial-HTML, kompilierte JARs (~9.6 MB)
+- Umbenannt (rollenbasiert):
+  - `bu03_visualize_and_send/` → `sender/` (Processing, Game-Logik + OSC)
+  - `bu03_vr_receiver_pygame/` → `receiver/` (Pygame, VR-Headsets)
+  - BU03-Hardware-Doku → `docs/hardware/`
+- `docs/osc-protocol.md` (new): OSC-Adressen, GameStates, Spielregeln als Referenz
+- `README.md` (modified): Architektur (Sender/Receiver) + Repo-Struktur
+- `sender/sender.pde` (modified): Kommentar `GAME_TIME_S` korrigiert (Sekunden, Rundendauer)
+
+### Commands Executed
+- `git rm` / `git mv` für Deletions und Renames
+- Smoke-Test: `python3 -m py_compile receiver/receiver.py` – OK
+- Merge nach `main` (`70e66c7`) und Push
+
+### Notes
+- Neue Struktur: `sender/` + `receiver/` + `docs/` (hardware, osc-protocol.md, agent-sessions)
+- Processing-Konvention beachten: Ordnername = Haupt-`.pde`-Name
+- PDFs unter `docs/hardware/references/` sind gitignored (nicht im Repo)
+
 ## 16.08.2026 – Session
 
 **it works!**
