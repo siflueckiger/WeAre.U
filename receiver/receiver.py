@@ -5,7 +5,7 @@ from pythonosc.osc_server import BlockingOSCUDPServer
 import pygame
 
 # ============================ CONFIG ============================
-LISTEN_PORT = 8000      # must match OSC_TARGET_PORT in bu03_visualize_and_send.pde
+LISTEN_PORT = 8000      # must match OSC_TARGET_PORT in sender/sender.pde
 
 # Anchor positions A0..A3 in mm -- standard 3x7m layout.
 # Synced live from the sender via /anchors (setup mode); fallback below.
@@ -16,7 +16,7 @@ TRAIL_MAX = 60
 C_P1 = (0, 200, 255)
 C_P2 = (255, 150, 40)
 
-# Game states -- MUST MATCH bu03_visualize_and_send.pde
+# Game states -- MUST MATCH sender/sender.pde
 STATE_WAIT = 0
 STATE_PLAYING = 1
 STATE_GAMEOVER = 2
@@ -41,7 +41,7 @@ MARGIN = 30             # px margin inside each eye viewport
 EYE_OFFSET_MM = 150     # horizontal parallax per eye in mm (0 = no stereo)
 
 # Rotate image 180 deg if display is mounted upside down.
-# Override: BU03_FLIP_180=0 python bu03_vr_receiver.py
+# Override: BU03_FLIP_180=0 python receiver.py
 FLIP_180 = os.environ.get("BU03_FLIP_180", "1") == "1"
 # ================================================================
 

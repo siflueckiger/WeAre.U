@@ -35,13 +35,13 @@ int     OSC_TARGET_PORT = 8000;
 int     OSC_LOCAL_PORT  = 12000;            // unused listen port (required by oscP5)
 
 // ============================ GAME ============================
-// Game states -- MUST MATCH bu03_vr_receiver.py (weareu_pygame states + READY)
+// Game states -- MUST MATCH receiver/receiver.py
 int STATE_WAIT     = 0;   // players must reach their start zones
 int STATE_PLAYING  = 1;   // round running
 int STATE_GAMEOVER = 2;   // winner screen, auto restart
 int STATE_READY    = 3;   // countdown before round start
 
-int GAME_TIME_S             = 30;    // 3 minutes per round
+int GAME_TIME_S             = 30;    // round duration in seconds
 float COLLECT_RADIUS_MM     = 500;    // distance to pick up the coin
 float COIN_MARGIN_MM        = 500;    // coin spawn: distance to field border
 float COIN_MIN_DIST_PLAYER_MM = 800;  // coin must not spawn on top of a player
