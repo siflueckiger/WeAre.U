@@ -7,10 +7,11 @@ import netP5.*;
 String PORT_HINT = "usbmodem";   // substring to auto-find the port (Serial.list())
 int BAUD = 115200;
 
-// Anchor positions A0..A3 in mm -- FILL THESE IN with your real geometry.
-// Units must match the distance values from the BU03 (mm).
-float[] AX = { 1710, 50, 6420, 6550 };
-float[] AY = { 3000, 350, 130, 2960 };
+// Anchor positions A0..A3 in mm -- standard layout: 3x7m field.
+// A0 top left, A1 bottom left, A2 bottom right, A3 top right.
+// Setup mode (auto-layout from measured distances) or config.json override these.
+float[] AX = { 0, 0, 7000, 7000 };
+float[] AY = { 3000, 0, 0, 3000 };
 
 // Tag addresses as reported in the frame (hex).
 int TAG0_ID = 0x0000;
@@ -49,13 +50,28 @@ float READY_S               = 3;      // countdown length
 float GAMEOVER_S            = 10;     // winner screen length
 float START_ZONE_RADIUS_MM  = 250;    // radius a player must be within
 
-// Start positions per player -- ADJUST to your real player entry points.
-float[] P1_START = { 1200, 2400 };
-float[] P2_START = { 5400, 700 };
+// Start positions per player -- standard: middle of the field, 1 m apart.
+// Override in setup mode (Z/X capture or mouse drag) / config.json.
+float[] P1_START = { 3000, 1500 };
+float[] P2_START = { 4000, 1500 };
 
 color C_COIN = color(255, 220, 40);
 int COIN_SIZE_PX = 14;
 int OSC_GAME_INTERVAL_MS = 100;       // coin + stats send rate
+
+// ============================ SETUP MODE ============================
+// App modes: TAB toggles between game and interactive setup.
+int MODE_GAME  = 0;
+int MODE_SETUP = 1;
+
+// Measured anchor distances in mm, pairs: 01 02 03 12 13 23.
+// Set in setup mode, auto-layout computes AX/AY from them.
+float[] anchorD = new float[6];
+int[][] D_PAIRS = { {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3} };
+String[] D_NAMES = { "A0-A1", "A0-A2", "A0-A3", "A1-A2", "A1-A3", "A2-A3" };
+
+String CONFIG_FILENAME = "config.json";
+float LAYOUT_WARN_MM = 200;           // D23 mismatch warning threshold
 // ================================================================
 
 static final byte[] HEAD = { 'C', 'm', 'd', 'M', ':', '4' };
@@ -85,6 +101,8 @@ long stateEnteredMs = 0;
 float[] coinPos = null;
 long lastGameOscMs = 0;
 
+int appMode = MODE_GAME;
+
 void setup() {
   size(1000, 800);
   try {
@@ -96,6 +114,9 @@ void setup() {
     piAddr = null;
     println("OSC init failed (disabled): " + e.getMessage());
   }
+  loadConfig();
+  sendStartZones();
+  sendAnchors();
   trySerial();
 }
 
@@ -103,15 +124,20 @@ void draw() {
   background(22);
   if (port == null && millis() - lastPortTry > 2000) trySerial();
   updateTransform();
-  updateGame();
-  sendGameOsc();
+  if (appMode == MODE_GAME) {
+    updateGame();
+    sendGameOsc();
+  }
   drawGrid();
   drawAnchors();
-  drawStartZones();
-  if (gameState == STATE_PLAYING && coinPos != null) drawCoin();
+  if (appMode == MODE_GAME) {
+    drawStartZones();
+    if (gameState == STATE_PLAYING && coinPos != null) drawCoin();
+  }
   drawTag(TAG0_ID, C_T0, "P1");
   drawTag(TAG1_ID, C_T1, "P2");
-  drawHud();
+  if (appMode == MODE_GAME) drawHud();
+  else setupDraw();   // defined in Setup.pde
 }
 
 void trySerial() {
@@ -301,6 +327,18 @@ boolean inZone(TagData t, float[] zone) {
 }
 
 void keyPressed() {
+  if (key == CODED && keyCode == SHIFT) {
+    shiftHeld = true;
+    return;
+  }
+  if (key == TAB) {
+    setAppMode(appMode == MODE_GAME ? MODE_SETUP : MODE_GAME);
+    return;
+  }
+  if (appMode == MODE_SETUP) {
+    setupKey();   // defined in Setup.pde
+    return;
+  }
   if (key == '1') {
     USE_SPEED_CLAMP = !USE_SPEED_CLAMP;
     println("Speed clamp: " + onOff(USE_SPEED_CLAMP));
@@ -320,6 +358,101 @@ void keyPressed() {
       println("SPACE: manual round start (debug)");
     }
   }
+}
+
+// ============================ APP MODE / CONFIG ============================
+
+void setAppMode(int m) {
+  appMode = m;
+  if (m == MODE_GAME) {
+    setState(STATE_WAIT);   // clean restart after setup
+    sendStartZones();
+    sendAnchors();
+  }
+  println("app mode -> " + (m == MODE_GAME ? "GAME" : "SETUP"));
+}
+
+void loadConfig() {
+  File f = new File(dataPath(CONFIG_FILENAME));
+  if (!f.exists()) {
+    println("no " + CONFIG_FILENAME + " -- using built-in defaults");
+    computeD();
+    return;
+  }
+  try {
+    JSONObject j = loadJSONObject(CONFIG_FILENAME);
+    JSONArray ax = j.getJSONArray("AX");
+    JSONArray ay = j.getJSONArray("AY");
+    if (ax != null && ay != null && ax.size() == 4 && ay.size() == 4) {
+      for (int i = 0; i < 4; i++) {
+        AX[i] = ax.getFloat(i);
+        AY[i] = ay.getFloat(i);
+      }
+    }
+    JSONArray d = j.getJSONArray("D");
+    if (d != null && d.size() == 6) for (int i = 0; i < 6; i++) anchorD[i] = d.getFloat(i);
+    else computeD();
+    JSONArray p1 = j.getJSONArray("P1_START");
+    if (p1 != null && p1.size() == 2) { P1_START[0] = p1.getFloat(0); P1_START[1] = p1.getFloat(1); }
+    JSONArray p2 = j.getJSONArray("P2_START");
+    if (p2 != null && p2.size() == 2) { P2_START[0] = p2.getFloat(0); P2_START[1] = p2.getFloat(1); }
+    println("config loaded: " + dataPath(CONFIG_FILENAME));
+  } catch (Exception e) {
+    println("config load failed: " + e.getMessage());
+    computeD();
+  }
+}
+
+void saveConfig() {
+  try {
+    JSONObject j = new JSONObject();
+    JSONArray ax = new JSONArray();
+    JSONArray ay = new JSONArray();
+    for (int i = 0; i < 4; i++) { ax.setFloat(i, AX[i]); ay.setFloat(i, AY[i]); }
+    j.setJSONArray("AX", ax);
+    j.setJSONArray("AY", ay);
+    JSONArray d = new JSONArray();
+    for (int i = 0; i < 6; i++) d.setFloat(i, anchorD[i]);
+    j.setJSONArray("D", d);
+    JSONArray p1 = new JSONArray();
+    JSONArray p2 = new JSONArray();
+    p1.setFloat(0, P1_START[0]); p1.setFloat(1, P1_START[1]);
+    p2.setFloat(0, P2_START[0]); p2.setFloat(1, P2_START[1]);
+    j.setJSONArray("P1_START", p1);
+    j.setJSONArray("P2_START", p2);
+    saveJSONObject(j, CONFIG_FILENAME);
+    println("config saved: " + dataPath(CONFIG_FILENAME));
+  } catch (Exception e) {
+    println("config save failed: " + e.getMessage());
+  }
+}
+
+void computeD() {
+  for (int i = 0; i < 6; i++) {
+    anchorD[i] = dist(AX[D_PAIRS[i][0]], AY[D_PAIRS[i][0]], AX[D_PAIRS[i][1]], AY[D_PAIRS[i][1]]);
+  }
+}
+
+void sendStartZones() {
+  if (!OSC_ENABLED || osc == null || piAddr == null) return;
+  OscMessage m1 = new OscMessage("/start/p1");
+  m1.add(P1_START[0]);
+  m1.add(P1_START[1]);
+  osc.send(m1, piAddr);
+  OscMessage m2 = new OscMessage("/start/p2");
+  m2.add(P2_START[0]);
+  m2.add(P2_START[1]);
+  osc.send(m2, piAddr);
+  oscSent += 2;
+}
+
+void sendAnchors() {
+  if (!OSC_ENABLED || osc == null || piAddr == null) return;
+  OscMessage m = new OscMessage("/anchors");
+  for (int i = 0; i < 4; i++) m.add(AX[i]);
+  for (int i = 0; i < 4; i++) m.add(AY[i]);
+  osc.send(m, piAddr);
+  oscSent++;
 }
 
 String onOff(boolean b) {
@@ -408,7 +541,7 @@ void drawAnchors() {
 }
 
 void drawStartZones() {
-  if (gameState != STATE_WAIT && gameState != STATE_READY) return;
+  if (appMode != MODE_SETUP && gameState != STATE_WAIT && gameState != STATE_READY) return;
   drawZone(P1_START, "P1", C_T0);
   drawZone(P2_START, "P2", C_T1);
 }
