@@ -1,2 +1,0 @@
-pippygame
-python-osc
