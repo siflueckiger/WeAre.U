@@ -7,9 +7,10 @@ import pygame
 # ============================ CONFIG ============================
 LISTEN_PORT = 8000      # must match OSC_TARGET_PORT in bu03_visualize_and_send.pde
 
-# Anchor positions A0..A3 in mm -- MUST MATCH the sender sketch.
-AX = [1710, 50, 6420, 6550]
-AY = [3000, 350, 130, 2960]
+# Anchor positions A0..A3 in mm -- standard 3x7m layout.
+# Synced live from the sender via /anchors (setup mode); fallback below.
+AX = [0, 0, 7000, 7000]
+AY = [3000, 0, 0, 3000]
 
 TRAIL_MAX = 60
 C_P1 = (0, 200, 255)
@@ -21,10 +22,11 @@ STATE_PLAYING = 1
 STATE_GAMEOVER = 2
 STATE_READY = 3
 
-# Start zones -- MUST MATCH the sender sketch.
-P1_START = (1200, 2400)
-P2_START = (5400, 700)
-START_ZONE_RADIUS_MM = 500
+# Start zones -- synced live from the sender via /start/p1 and /start/p2
+# (setup mode). The values below are only fallbacks.
+P1_START = [1200, 2400]
+P2_START = [5400, 700]
+START_ZONE_RADIUS_MM = 250
 
 C_COIN = (255, 220, 40)
 COIN_PX = 10
@@ -91,6 +93,23 @@ def coin_handler(address, *args):
     coin_pos = (float(args[0]), float(args[1]))
 
 
+def make_start_handler(zone):
+    def handler(address, *args):
+        if len(args) < 2:
+            return
+        zone[0] = float(args[0])
+        zone[1] = float(args[1])
+    return handler
+
+
+def anchors_handler(address, *args):
+    if len(args) < 8:
+        return
+    for i in range(4):
+        AX[i] = float(args[i])
+        AY[i] = float(args[i + 4])
+
+
 def stats_handler(address, *args):
     global game_state, time_left, p1_score, p2_score, packets, last_packet_ms
     if len(args) < 4:
@@ -109,6 +128,9 @@ def start_osc():
     dispatcher.map("/p2/pos", make_pos_handler(0x0001))
     dispatcher.map("/coin/pos", coin_handler)
     dispatcher.map("/game/stats", stats_handler)
+    dispatcher.map("/start/p1", make_start_handler(P1_START))
+    dispatcher.map("/start/p2", make_start_handler(P2_START))
+    dispatcher.map("/anchors", anchors_handler)
     server = BlockingOSCUDPServer(("0.0.0.0", LISTEN_PORT), dispatcher)
     print(f"listening for OSC on port {LISTEN_PORT}")
     server.serve_forever()
