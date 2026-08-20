@@ -35,7 +35,7 @@ int     OSC_TARGET_PORT = 8000;
 int     OSC_LOCAL_PORT  = 12000;            // unused listen port (required by oscP5)
 
 // ============================ GAME ============================
-// Game states -- MUST MATCH bu03_vr_receiver.py (weareu_pygame states + READY)
+// Game states -- MUST MATCH receiver/receiver.py
 int STATE_WAIT     = 0;   // players must reach their start zones
 int STATE_PLAYING  = 1;   // round running
 int STATE_GAMEOVER = 2;   // winner screen, auto restart

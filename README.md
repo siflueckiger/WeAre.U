@@ -35,4 +35,26 @@ Die Evolution von *WeAre*. Spieler tragen VR-Headsets (Raspberry Pi) und UWB-Tag
 - **GameEngine:** 1x ESP32 oder Pi Pico oder so, um die Game-States zu steuern und Daten per OSC an die Spieler zu schicken
 
 ## Software
-- **Processing**:
+
+### Architektur (aktueller Stand)
+- **Sender** (`sender/`, Processing): läuft auf einem MacBook, das per USB am Anchor hängt. Liest Tag-Distanzen aus, berechnet Koordinaten, enthält die komplette Game-Logik (GameStates, Coin, Scores) und schickt alles per OSC an die Receiver.
+- **Receiver** (`receiver/`, Python/Pygame): läuft auf den Raspberry-Pi-VR-Headsets. Empfängt OSC auf Port 8000 und visualisiert das Spiel (Split-Screen-Stereo für beide Augen).
+- **OSC-Protokoll:** siehe `docs/osc-protocol.md`.
+
+### Repo-Struktur
+```
+WeAre.U/
+├── README.md              ← diese Datei
+├── PROJECT-LOG.md         ← Projekt-Historie
+├── sender/                ← Processing-Sketch (Game-Logik + OSC-Sender)
+│   ├── sender.pde
+│   └── Setup.pde          ← Setup-Modus (Anchor-Kalibrierung, Startzonen)
+├── receiver/              ← Pygame-Receiver für VR-Headsets
+│   ├── receiver.py
+│   └── requirements.txt
+└── docs/
+    ├── hardware/          ← BU03-Dokumentation (AT-Commands, PDFs)
+    ├── osc-protocol.md    ← OSC-Protokoll zwischen Sender und Receiver
+    └── agent-sessions/    ← Session-Logs der Agent-Sitzungen
+```
+
