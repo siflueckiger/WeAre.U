@@ -32,6 +32,30 @@ boolean OSC_ENABLED = true;
 String  OSC_TARGET_IP   = "192.168.1.104";  // FILL IN: Pi IP
 int     OSC_TARGET_PORT = 8000;
 int     OSC_LOCAL_PORT  = 12000;            // unused listen port (required by oscP5)
+
+// ============================ GAME ============================
+// Game states -- MUST MATCH bu03_vr_receiver.py (weareu_pygame states + READY)
+int STATE_WAIT     = 0;   // players must reach their start zones
+int STATE_PLAYING  = 1;   // round running
+int STATE_GAMEOVER = 2;   // winner screen, auto restart
+int STATE_READY    = 3;   // countdown before round start
+
+int GAME_TIME_S             = 30;    // 3 minutes per round
+float COLLECT_RADIUS_MM     = 500;    // distance to pick up the coin
+float COIN_MARGIN_MM        = 500;    // coin spawn: distance to field border
+float COIN_MIN_DIST_PLAYER_MM = 800;  // coin must not spawn on top of a player
+float COIN_FAIR_DIFF_MM     = 1200;   // fairness: |distP1 - distP2| <= this
+float READY_S               = 3;      // countdown length
+float GAMEOVER_S            = 10;     // winner screen length
+float START_ZONE_RADIUS_MM  = 250;    // radius a player must be within
+
+// Start positions per player -- ADJUST to your real player entry points.
+float[] P1_START = { 1200, 2400 };
+float[] P2_START = { 5400, 700 };
+
+color C_COIN = color(255, 220, 40);
+int COIN_SIZE_PX = 14;
+int OSC_GAME_INTERVAL_MS = 100;       // coin + stats send rate
 // ================================================================
 
 static final byte[] HEAD = { 'C', 'm', 'd', 'M', ':', '4' };
@@ -53,6 +77,14 @@ int oscSent = 0;
 
 float s = 1, ox = 0, oy = 0;
 
+// game state
+int gameState = STATE_WAIT;
+int scoreP1 = 0, scoreP2 = 0;
+float timeLeft = 0;
+long stateEnteredMs = 0;
+float[] coinPos = null;
+long lastGameOscMs = 0;
+
 void setup() {
   size(1000, 800);
   try {
@@ -71,10 +103,14 @@ void draw() {
   background(22);
   if (port == null && millis() - lastPortTry > 2000) trySerial();
   updateTransform();
+  updateGame();
+  sendGameOsc();
   drawGrid();
   drawAnchors();
-  drawTag(TAG0_ID, C_T0, "T0");
-  drawTag(TAG1_ID, C_T1, "T1");
+  drawStartZones();
+  if (gameState == STATE_PLAYING && coinPos != null) drawCoin();
+  drawTag(TAG0_ID, C_T0, "P1");
+  drawTag(TAG1_ID, C_T1, "P2");
   drawHud();
 }
 
@@ -152,12 +188,116 @@ void handleFrame(Frame f) {
 
 void sendPos(int tagid, float x, float y) {
   if (!OSC_ENABLED || osc == null || piAddr == null) return;
-  OscMessage m = new OscMessage("/pos");
-  m.add(tagid);
+  OscMessage m = new OscMessage(tagid == TAG0_ID ? "/p1/pos" : "/p2/pos");
   m.add(x);
   m.add(y);
   osc.send(m, piAddr);
   oscSent++;
+}
+
+void sendGameOsc() {
+  if (!OSC_ENABLED || osc == null || piAddr == null) return;
+  if (millis() - lastGameOscMs < OSC_GAME_INTERVAL_MS) return;
+  lastGameOscMs = millis();
+  int tl = (gameState == STATE_READY) ? (int)ceil(timeLeft) : (int)floor(timeLeft);
+  OscMessage stats = new OscMessage("/game/stats");
+  stats.add(gameState);
+  stats.add(tl);
+  stats.add(scoreP1);
+  stats.add(scoreP2);
+  osc.send(stats, piAddr);
+  if (gameState == STATE_PLAYING && coinPos != null) {
+    OscMessage c = new OscMessage("/coin/pos");
+    c.add(coinPos[0]);
+    c.add(coinPos[1]);
+    osc.send(c, piAddr);
+  }
+}
+
+// ============================ GAME LOGIC ============================
+
+void setState(int s) {
+  gameState = s;
+  stateEnteredMs = millis();
+  lastGameOscMs = 0;   // force immediate /game/stats send
+  println("game state -> " + stateName(s));
+}
+
+String stateName(int s) {
+  if (s == STATE_WAIT) return "WAIT";
+  if (s == STATE_PLAYING) return "PLAYING";
+  if (s == STATE_GAMEOVER) return "GAMEOVER";
+  if (s == STATE_READY) return "READY";
+  return "?";
+}
+
+void updateGame() {
+  TagData t0 = tags.get(TAG0_ID);
+  TagData t1 = tags.get(TAG1_ID);
+
+  if (gameState == STATE_WAIT) {
+    timeLeft = 0;
+    if (inZone(t0, P1_START) && inZone(t1, P2_START)) setState(STATE_READY);
+  } else if (gameState == STATE_READY) {
+    timeLeft = max(0, READY_S - (millis() - stateEnteredMs) / 1000.0f);
+    if (!inZone(t0, P1_START) || !inZone(t1, P2_START)) {
+      setState(STATE_WAIT);   // a player left the zone -> abort countdown
+    } else if (timeLeft <= 0) {
+      startRound();
+    }
+  } else if (gameState == STATE_PLAYING) {
+    timeLeft = max(0, GAME_TIME_S - (millis() - stateEnteredMs) / 1000.0f);
+    if (coinPos != null) {
+      if (t0 != null && t0.pos != null && dist(t0.pos.x, t0.pos.y, coinPos[0], coinPos[1]) < COLLECT_RADIUS_MM) {
+        collectCoin(1);
+      } else if (t1 != null && t1.pos != null && dist(t1.pos.x, t1.pos.y, coinPos[0], coinPos[1]) < COLLECT_RADIUS_MM) {
+        collectCoin(2);
+      }
+    }
+    if (timeLeft <= 0) setState(STATE_GAMEOVER);
+  } else if (gameState == STATE_GAMEOVER) {
+    if (millis() - stateEnteredMs > GAMEOVER_S * 1000) setState(STATE_WAIT);
+  }
+}
+
+void startRound() {
+  scoreP1 = 0;
+  scoreP2 = 0;
+  spawnCoin();
+  timeLeft = GAME_TIME_S;
+  setState(STATE_PLAYING);
+}
+
+void collectCoin(int player) {
+  if (player == 1) scoreP1++;
+  else scoreP2++;
+  println("P" + player + " collected coin -> P1:" + scoreP1 + " P2:" + scoreP2);
+  spawnCoin();
+}
+
+void spawnCoin() {
+  float minx = min(AX), maxx = max(AX);
+  float miny = min(AY), maxy = max(AY);
+  TagData t0 = tags.get(TAG0_ID);
+  TagData t1 = tags.get(TAG1_ID);
+  for (int i = 0; i < 100; i++) {
+    float x = random(minx + COIN_MARGIN_MM, maxx - COIN_MARGIN_MM);
+    float y = random(miny + COIN_MARGIN_MM, maxy - COIN_MARGIN_MM);
+    float d0 = (t0 != null && t0.pos != null) ? dist(x, y, t0.pos.x, t0.pos.y) : Float.MAX_VALUE;
+    float d1 = (t1 != null && t1.pos != null) ? dist(x, y, t1.pos.x, t1.pos.y) : Float.MAX_VALUE;
+    if (min(d0, d1) < COIN_MIN_DIST_PLAYER_MM) continue;              // too close to a player
+    if (t0 != null && t1 != null && t0.pos != null && t1.pos != null
+        && abs(d0 - d1) > COIN_FAIR_DIFF_MM) continue;                 // unfair for one player
+    coinPos = new float[] { x, y };
+    return;
+  }
+  // fallback (e.g. no player fix yet): random inside margin box
+  coinPos = new float[] { random(minx + COIN_MARGIN_MM, maxx - COIN_MARGIN_MM),
+                          random(miny + COIN_MARGIN_MM, maxy - COIN_MARGIN_MM) };
+}
+
+boolean inZone(TagData t, float[] zone) {
+  return t != null && t.pos != null && dist(t.pos.x, t.pos.y, zone[0], zone[1]) < START_ZONE_RADIUS_MM;
 }
 
 void keyPressed() {
@@ -173,6 +313,12 @@ void keyPressed() {
     else if (SMOOTH_ALPHA < 0.65f) SMOOTH_ALPHA = 0.80f;
     else SMOOTH_ALPHA = 0.15f;
     println("EMA alpha: " + SMOOTH_ALPHA);
+  } else if (key == ' ') {
+    // debug: start round immediately, skipping the start-zone check
+    if (gameState == STATE_WAIT || gameState == STATE_GAMEOVER) {
+      startRound();
+      println("SPACE: manual round start (debug)");
+    }
   }
 }
 
@@ -261,6 +407,35 @@ void drawAnchors() {
   }
 }
 
+void drawStartZones() {
+  if (gameState != STATE_WAIT && gameState != STATE_READY) return;
+  drawZone(P1_START, "P1", C_T0);
+  drawZone(P2_START, "P2", C_T1);
+}
+
+void drawZone(float[] p, String label, color c) {
+  PVector q = scr(p[0], p[1]);
+  float r = START_ZONE_RADIUS_MM * s;
+  noFill();
+  stroke(c, 160);
+  strokeWeight(2);
+  ellipse(q.x, q.y, 2 * r, 2 * r);
+  fill(c);
+  textAlign(CENTER, CENTER);
+  text(label, q.x, q.y);
+}
+
+void drawCoin() {
+  PVector p = scr(coinPos[0], coinPos[1]);
+  fill(C_COIN);
+  stroke(255);
+  strokeWeight(2);
+  ellipse(p.x, p.y, COIN_SIZE_PX, COIN_SIZE_PX);
+  fill(0);
+  textAlign(CENTER, CENTER);
+  text("$", p.x, p.y + 1);
+}
+
 void drawTag(int id, color c, String label) {
   TagData t = tags.get(id);
   float alphaBase = 255;
@@ -293,8 +468,11 @@ void drawTag(int id, color c, String label) {
 void drawHud() {
   textAlign(LEFT, TOP);
   int y = 10;
+  fill(255, 230, 120);
+  text("GAME: " + stateName(gameState) + "  |  time: " + nf(timeLeft, 0, 0) + "s  |  P1: " + scoreP1 + "  P2: " + scoreP2, 10, y);
+  y += 18;
   fill(180, 230, 180);
-  text("Filters: Clamp[" + onOff(USE_SPEED_CLAMP) + "]  EMA[" + onOff(USE_EMA) + " a=" + nf(SMOOTH_ALPHA, 0, 2) + "]  |  keys: 1/2 toggle, 4 = alpha", 10, y);
+  text("Filters: Clamp[" + onOff(USE_SPEED_CLAMP) + "]  EMA[" + onOff(USE_EMA) + " a=" + nf(SMOOTH_ALPHA, 0, 2) + "]  |  keys: 1/2 toggle, 4 = alpha, SPACE = start round", 10, y);
   y += 18;
   if (port == null) {
     fill(255, 120, 120);
@@ -323,9 +501,9 @@ void drawHud() {
   }
 
   y += 8;
-  hudTag(y, TAG0_ID, "T0", C_T0);
+  hudTag(y, TAG0_ID, "P1", C_T0);
   y += 56;
-  hudTag(y, TAG1_ID, "T1", C_T1);
+  hudTag(y, TAG1_ID, "P2", C_T1);
   fill(150);
   text("OSC: " + (OSC_ENABLED ? "ON -> " + OSC_TARGET_IP + ":" + OSC_TARGET_PORT + "  sent: " + oscSent : "OFF"), 10, height - 36);
   text("scale: " + nf(s, 0, 3) + " px/mm  |  grid: 500 mm", 10, height - 18);
