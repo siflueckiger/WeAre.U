@@ -1,5 +1,56 @@
 # WeAre.U Projektlog
 
+## 20.08.2026
+
+### Was wir heute gemacht haben
+
+- Repo aufgeräumt und neu strukturiert (`sender/` + `receiver/` + `docs/`)
+- Prototyp Headset bauen
+- Prototyp Game-Logik (Coin-Sammeln, Scores, GameStates)
+- `sender.pde` hat einen Setup-Mode (TAB), um die Distanzen der Anchors zu erfassen und die Startpositionen der Player festzulegen
+
+### Next
+
+- ???
+
+## 20.08.2026 – Agent-Session (Minimal Gameplay)
+
+### Goal
+Minimales Gameplay für die VR-Installation: Game-Logik liegt komplett im Processing-Sender, der Pygame-Receiver visualisiert nur.
+
+### Branches
+- `agent/bu03-minimal-gameplay` – gemergt nach `main`
+
+### Files Changed
+- `sender/sender.pde` (modified)
+  - Game-State-Machine (WAIT/READY/PLAYING/GAMEOVER), Coin-Spawn/-Collect-Logik, Startzonen
+  - OSC: `/p1/pos` + `/p2/pos` (pro Frame), `/coin/pos` + `/game/stats` (alle 100 ms, sofort bei State-Wechsel)
+- `receiver/receiver.py` (modified)
+  - Handler für die neuen Addresses, State-Rendering, Game-HUD in beiden Augen, Labels T0/T1 → P1/P2
+
+### Notes
+- `P1_START`/`P2_START` müssen in Sender und Receiver übereinstimmen (`MUST MATCH`)
+- Alter Processing-Receiver (`bu03_vr_receiver_processing`) wurde nicht angepasst (protokoll-inkompatibel)
+
+## 20.08.2026 – Agent-Session (Setup-Modus)
+
+### Goal
+Interaktiver Setup-Modus im Sender: Anchor-Distanzen eingeben → Auto-Layout, Startzonen per Tag-Capture oder Maus-Drag, Persistenz in `data/config.json`, Sync per OSC an den Receiver.
+
+### Branches
+- `agent/bu03-setup-mode` – gemergt nach `main`
+
+### Files Changed
+- `sender/sender.pde` (modified)
+  - `MODE_GAME`/`MODE_SETUP` + TAB-Umschaltung, `loadConfig()`/`saveConfig()`
+  - Neue OSC-Adressen: `/start/p1`, `/start/p2`, `/anchors` (Sync an Receiver)
+- `sender/Setup.pde` (new)
+  - Distanz-Panel (6 Anchor-Distanzen), Auto-Layout per Kreisschnitt, Maus-Drag für Anchors/Zonen
+
+### Notes
+- Bedienung: Pfeiltasten/Ziffern für Distanzen, `L` Auto-Layout, `Z`/`X` Startzonen-Capture, `V` speichern, `R` Standard-Layout 3x7m
+- `data/config.json` überschreibt die Defaults; Test im Processing-Editor nötig
+
 ## 20.08.2026 – Agent-Session (Repo-Cleanup & Restrukturierung)
 
 ### Goal
@@ -9,28 +60,13 @@ Repo bereinigen und sauber strukturieren: veraltete Prototypen und Build-Artefak
 - `agent/repo-cleanup` – Deletions + Renames, gemergt nach `main` und gepusht
 
 ### Files Changed
-- Gelöscht (veraltet / überflüssig):
-  - `rasperry pi/` – alter April-Prototyp (Processing-GameVisualizer, alte Pygame-Version); das OSC-Protokoll wurde daraus übernommen
-  - `bu03_vr_receiver_processing/` – alter Processing-Receiver, versteht das neue Protokoll nicht mehr
-  - Alte BU03-ESP32-Sketches (`AT-Anchor-*`, `AT-CmdM4-*`, `AT-Tag-Config*`) + alter UWB-2D-Visualizer inkl. `.autosave`-Dateien
-  - Obsidian-Canvas-Versionen (`WeAre3.0*.canvas`), Tutorial-HTML, kompilierte JARs (~9.6 MB)
-- Umbenannt (rollenbasiert):
-  - `bu03_visualize_and_send/` → `sender/` (Processing, Game-Logik + OSC)
-  - `bu03_vr_receiver_pygame/` → `receiver/` (Pygame, VR-Headsets)
-  - BU03-Hardware-Doku → `docs/hardware/`
-- `docs/osc-protocol.md` (new): OSC-Adressen, GameStates, Spielregeln als Referenz
-- `README.md` (modified): Architektur (Sender/Receiver) + Repo-Struktur
-- `sender/sender.pde` (modified): Kommentar `GAME_TIME_S` korrigiert (Sekunden, Rundendauer)
-
-### Commands Executed
-- `git rm` / `git mv` für Deletions und Renames
-- Smoke-Test: `python3 -m py_compile receiver/receiver.py` – OK
-- Merge nach `main` (`70e66c7`) und Push
+- Gelöscht: `rasperry pi/` (alter April-Prototyp), `bu03_vr_receiver_processing/`, alte BU03-ESP32-Sketches + `.autosave`-Dateien, `WeAre3.0*.canvas`, Tutorial-HTML, kompilierte JARs (~9.6 MB)
+- Umbenannt: `bu03_visualize_and_send/` → `sender/`, `bu03_vr_receiver_pygame/` → `receiver/`, BU03-Doku → `docs/hardware/`
+- `docs/osc-protocol.md` (new), `README.md` (modified)
 
 ### Notes
 - Neue Struktur: `sender/` + `receiver/` + `docs/` (hardware, osc-protocol.md, agent-sessions)
-- Processing-Konvention beachten: Ordnername = Haupt-`.pde`-Name
-- PDFs unter `docs/hardware/references/` sind gitignored (nicht im Repo)
+- Processing-Konvention: Ordnername = Haupt-`.pde`-Name
 
 ## 16.08.2026 – Session
 
@@ -51,15 +87,18 @@ Zwei Tags gleichzeitig über einen Anchor auszulesen funktioniert.
 ## 16.08.2026 – Agent-Session (Code-Arbeit)
 
 ### Goal
+
 Pygame-Variante des BU03-VR-Receivers für den Raspberry Pi (VR-Brille 800x480), mit Split-Screen-Stereo-Ansicht und 180°-Flip für das kopfstehend montierte Display.
 
 ### Branches
+
 - `agent/bu03-pygame-receiver` – initiale Pygame-Portierung
 - `agent/bu03-pygame-splitscreen` – Split-Screen für VR-Brille 800x480
 - `agent/bu03-pygame-flip` – 180°-Rotation (Display kopfstehend)
 - Alles gemergt nach `main` und gepusht
 
 ### Files Changed
+
 - `bu03_vr_receiver_pygame/bu03_vr_receiver.py` (new)
   - OSC-Receiver auf Port 8000 (python-osc), `/pos` mit `(tagId, x, y)` in mm
   - Grid (500 mm), Anchors A0–A3, Tag-Dots mit Trails, Status-HUD
@@ -68,10 +107,12 @@ Pygame-Variante des BU03-VR-Receivers für den Raspberry Pi (VR-Brille 800x480),
 - `bu03_vr_receiver_pygame/requirements.txt` (new): `python-osc`, `pygame`
 
 ### Commands Executed
+
 - `git checkout -b agent/bu03-pygame-receiver` / `-splitscreen` / `-flip`
 - Smoke-Tests: `SDL_VIDEODRIVER=dummy` + Fake-OSC-Sender (`/pos` Pakete an 127.0.0.1:8000) – OK
 
 ### Notes
+
 - Pi: PEP 668 → Installation in venv (`python3 -m venv .venv`)
 - Start via SSH ohne Desktop: `SDL_VIDEODRIVER=KMSDRM python3 bu03_vr_receiver.py`
 - Alternative zum Software-Flip: `display_rotate=2` in `/boot/firmware/config.txt`
