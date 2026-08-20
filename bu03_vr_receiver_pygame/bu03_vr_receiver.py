@@ -5,15 +5,29 @@ from pythonosc.osc_server import BlockingOSCUDPServer
 import pygame
 
 # ============================ CONFIG ============================
-LISTEN_PORT = 8000      # must match OSC_TARGET_PORT in bu03_visualizer.pde
+LISTEN_PORT = 8000      # must match OSC_TARGET_PORT in bu03_visualize_and_send.pde
 
 # Anchor positions A0..A3 in mm -- MUST MATCH the sender sketch.
 AX = [1710, 50, 6420, 6550]
 AY = [3000, 350, 130, 2960]
 
 TRAIL_MAX = 60
-C_T0 = (0, 200, 255)
-C_T1 = (255, 150, 40)
+C_P1 = (0, 200, 255)
+C_P2 = (255, 150, 40)
+
+# Game states -- MUST MATCH bu03_visualize_and_send.pde
+STATE_WAIT = 0
+STATE_PLAYING = 1
+STATE_GAMEOVER = 2
+STATE_READY = 3
+
+# Start zones -- MUST MATCH the sender sketch.
+P1_START = (1200, 2400)
+P2_START = (5400, 700)
+START_ZONE_RADIUS_MM = 500
+
+C_COIN = (255, 220, 40)
+COIN_PX = 10
 
 FULLSCREEN = True       # False -> fixed window (debug on desktop)
 WINDOW_W = 800          # VR headset screen size (split into left/right eye)
@@ -32,9 +46,16 @@ FLIP_180 = os.environ.get("BU03_FLIP_180", "1") == "1"
 tags = {}
 packets = 0
 last_packet_ms = 0
+game_state = STATE_WAIT
+time_left = 0
+p1_score = 0
+p2_score = 0
+coin_pos = None
 clock = pygame.time.Clock()
 font = None
 font_small = None
+font_mid = None
+font_big = None
 
 
 class TagData:
@@ -44,28 +65,50 @@ class TagData:
         self.trail = []
 
 
-def osc_handler(address, *args):
-    global packets, last_packet_ms
-    if address != "/pos" or len(args) < 3:
+def make_pos_handler(tag_id):
+    def handler(address, *args):
+        global packets, last_packet_ms
+        if len(args) < 2:
+            return
+        x, y = float(args[0]), float(args[1])
+        packets += 1
+        last_packet_ms = pygame.time.get_ticks()
+        t = tags.get(tag_id)
+        if t is None:
+            t = TagData(tag_id)
+            tags[tag_id] = t
+        t.pos = (x, y)
+        t.trail.append(t.pos)
+        if len(t.trail) > TRAIL_MAX:
+            t.trail.pop(0)
+    return handler
+
+
+def coin_handler(address, *args):
+    global coin_pos
+    if len(args) < 2:
         return
-    tag_id = int(args[0])
-    x = float(args[1])
-    y = float(args[2])
+    coin_pos = (float(args[0]), float(args[1]))
+
+
+def stats_handler(address, *args):
+    global game_state, time_left, p1_score, p2_score, packets, last_packet_ms
+    if len(args) < 4:
+        return
     packets += 1
     last_packet_ms = pygame.time.get_ticks()
-    t = tags.get(tag_id)
-    if t is None:
-        t = TagData(tag_id)
-        tags[tag_id] = t
-    t.pos = (x, y)
-    t.trail.append(t.pos)
-    if len(t.trail) > TRAIL_MAX:
-        t.trail.pop(0)
+    game_state = int(args[0])
+    time_left = int(args[1])
+    p1_score = int(args[2])
+    p2_score = int(args[3])
 
 
 def start_osc():
     dispatcher = Dispatcher()
-    dispatcher.map("/pos", osc_handler)
+    dispatcher.map("/p1/pos", make_pos_handler(0x0000))
+    dispatcher.map("/p2/pos", make_pos_handler(0x0001))
+    dispatcher.map("/coin/pos", coin_handler)
+    dispatcher.map("/game/stats", stats_handler)
     server = BlockingOSCUDPServer(("0.0.0.0", LISTEN_PORT), dispatcher)
     print(f"listening for OSC on port {LISTEN_PORT}")
     server.serve_forever()
@@ -73,9 +116,9 @@ def start_osc():
 
 def tag_color(tag_id):
     if tag_id == 0x0000:
-        return C_T0
+        return C_P1
     if tag_id == 0x0001:
-        return C_T1
+        return C_P2
     return (200, 200, 255)
 
 
@@ -163,27 +206,94 @@ def draw_hud(surface, s):
         surface.blit(font.render(pos_text, True, (255, 255, 255)), (60, y))
         y += 20
     surface.blit(
+        font.render(
+            f"state={game_state} time={time_left} p1={p1_score} p2={p2_score} coin={coin_pos}",
+            True, (200, 200, 200),
+        ),
+        (10, y),
+    )
+    y += 20
+    surface.blit(
         font_small.render(f"scale: {s:.3f} px/mm  |  grid: 500 mm", True, (150, 150, 150)),
         (10, surface.get_height() - 18),
     )
 
 
-def render_eye(surface, s, ox, oy, draw_hud_flag):
+def fmt_mmss(seconds):
+    return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+
+
+def draw_center_text(surface, text, fnt, color, dy=0):
+    surf = fnt.render(text, True, color)
+    rect = surf.get_rect(center=(surface.get_width() // 2, surface.get_height() // 2 + dy))
+    surface.blit(surf, rect)
+
+
+def draw_start_zones(surface, s, ox, oy):
+    for p, label, color in ((P1_START, "P1", C_P1), (P2_START, "P2", C_P2)):
+        c = scr(p[0], p[1], s, ox, oy)
+        r = max(1, int(START_ZONE_RADIUS_MM * s))
+        pygame.draw.circle(surface, color, c, r, 2)
+        label_surf = font_mid.render(label, True, color)
+        surface.blit(label_surf, label_surf.get_rect(center=c))
+
+
+def draw_coin(surface, s, ox, oy):
+    if coin_pos is None:
+        return
+    c = scr(coin_pos[0], coin_pos[1], s, ox, oy)
+    pygame.draw.circle(surface, C_COIN, c, COIN_PX)
+    pygame.draw.circle(surface, (255, 255, 255), c, COIN_PX, 2)
+
+
+def draw_game_hud(surface):
+    w = surface.get_width()
+    timer_surf = font_mid.render(fmt_mmss(time_left), True, (255, 255, 255))
+    surface.blit(timer_surf, timer_surf.get_rect(midtop=(w // 2, 8)))
+    s1 = font_mid.render(str(p1_score), True, C_P1)
+    surface.blit(s1, s1.get_rect(topleft=(12, 8)))
+    s2 = font_mid.render(str(p2_score), True, C_P2)
+    surface.blit(s2, s2.get_rect(topright=(w - 12, 8)))
+
+
+def draw_game_overlay(surface):
+    if game_state == STATE_WAIT:
+        draw_center_text(surface, "Warte auf Spieler...", font_mid, (255, 255, 255))
+    elif game_state == STATE_READY:
+        draw_center_text(surface, str(max(1, time_left)), font_big, (255, 255, 255))
+    elif game_state == STATE_GAMEOVER:
+        draw_center_text(surface, "GAME OVER", font_big, (255, 255, 255), -40)
+        if p1_score > p2_score:
+            draw_center_text(surface, "SPIELER 1 GEWINNT!", font_mid, C_P1, 10)
+        elif p2_score > p1_score:
+            draw_center_text(surface, "SPIELER 2 GEWINNT!", font_mid, C_P2, 10)
+        else:
+            draw_center_text(surface, "UNENTSCHIEDEN!", font_mid, (200, 200, 200), 10)
+        draw_center_text(surface, f"P1: {p1_score}   P2: {p2_score}", font, (255, 255, 255), 50)
+
+
+def render_eye(surface, s, ox, oy, draw_debug_hud):
     surface.fill((22, 22, 22))
     draw_grid(surface, s, ox, oy)
     draw_anchors(surface, s, ox, oy)
     layer = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
     for tag_id in tags:
         color = tag_color(tag_id)
-        label = "T0" if tag_id == 0x0000 else ("T1" if tag_id == 0x0001 else f"0x{tag_id:04X}")
+        label = "P1" if tag_id == 0x0000 else ("P2" if tag_id == 0x0001 else f"0x{tag_id:04X}")
         draw_tag(surface, layer, tag_id, color, label, s, ox, oy)
     surface.blit(layer, (0, 0))
-    if draw_hud_flag:
+    if game_state in (STATE_WAIT, STATE_READY):
+        draw_start_zones(surface, s, ox, oy)
+    if game_state == STATE_PLAYING:
+        draw_coin(surface, s, ox, oy)
+        draw_game_hud(surface)
+    draw_game_overlay(surface)
+    if draw_debug_hud:
         draw_hud(surface, s)
 
 
 def main():
-    global font, font_small
+    global font, font_small, font_mid, font_big
     pygame.init()
     if FULLSCREEN:
         screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
@@ -192,6 +302,8 @@ def main():
     pygame.display.set_caption("WeAre.U BU03 VR Receiver (pygame)")
     font = pygame.font.Font(None, 20)
     font_small = pygame.font.Font(None, 16)
+    font_mid = pygame.font.Font(None, 36)
+    font_big = pygame.font.Font(None, 64)
 
     threading.Thread(target=start_osc, daemon=True).start()
 
@@ -208,8 +320,8 @@ def main():
         right = pygame.Surface((eye_w, h))
         s, ox, oy = update_transform(eye_w, h)
         off = EYE_OFFSET_MM * s
-        render_eye(left, s, ox + off, oy, draw_hud_flag=True)
-        render_eye(right, s, ox - off, oy, draw_hud_flag=False)
+        render_eye(left, s, ox + off, oy, draw_debug_hud=True)
+        render_eye(right, s, ox - off, oy, draw_debug_hud=False)
         if FLIP_180:
             left = pygame.transform.flip(left, True, True)
             right = pygame.transform.flip(right, True, True)
