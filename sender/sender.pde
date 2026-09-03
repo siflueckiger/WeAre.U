@@ -41,23 +41,22 @@ int STATE_PLAYING  = 1;   // round running
 int STATE_GAMEOVER = 2;   // winner screen, auto restart
 int STATE_READY    = 3;   // countdown before round start
 
-int GAME_TIME_S             = 30;    // round duration in seconds
-float COLLECT_RADIUS_MM     = 500;    // distance to pick up the coin
-float COIN_MARGIN_MM        = 500;    // coin spawn: distance to field border
-float COIN_MIN_DIST_PLAYER_MM = 800;  // coin must not spawn on top of a player
-float COIN_FAIR_DIFF_MM     = 1200;   // fairness: |distP1 - distP2| <= this
+int GAME_TIME_S             = 30;    // round duration in seconds (engine-owned)
 float READY_S               = 3;      // countdown length
 float GAMEOVER_S            = 10;     // winner screen length
 float START_ZONE_RADIUS_MM  = 250;    // radius a player must be within
+
+// Out-of-bounds: real players can leave the anchor field. Engine tracks how long
+// a player is outside and warns, then ends the round (see Core_GameMode.pde).
+float OOB_MARGIN_MM   = 400;          // tolerance beyond the field border
+float OOB_TIMEOUT_S   = 5;            // seconds outside before the round ends
 
 // Start positions per player -- standard: middle of the field, 1 m apart.
 // Override in setup mode (Z/X capture or mouse drag) / config.json.
 float[] P1_START = { 3000, 1500 };
 float[] P2_START = { 4000, 1500 };
 
-color C_COIN = color(255, 220, 40);
-int COIN_SIZE_PX = 14;
-int OSC_GAME_INTERVAL_MS = 100;       // coin + stats send rate
+int OSC_GAME_INTERVAL_MS = 100;       // stats + entity send rate
 
 // ============================ SETUP MODE ============================
 // App modes: TAB toggles between game and interactive setup.
@@ -93,15 +92,20 @@ int oscSent = 0;
 
 float s = 1, ox = 0, oy = 0;
 
-// game state
+// game state (engine-owned; mode state lives in the Mode_* classes)
 int gameState = STATE_WAIT;
-int scoreP1 = 0, scoreP2 = 0;
 float timeLeft = 0;
 long stateEnteredMs = 0;
-float[] coinPos = null;
+long lastTickMs = 0;
 long lastGameOscMs = 0;
+float[] oobCountdown = { OOB_TIMEOUT_S, OOB_TIMEOUT_S };
+boolean[] oobActive = { false, false };
+int roundWinner = -1;   // -1 = derive from scores, 1/2 = forced winner
 
 int appMode = MODE_GAME;
+
+boolean hudDebug = false;   // D: full tag details in player cards
+boolean hudKeys  = true;    // H: show key help panel
 
 void setup() {
   size(1000, 800);
@@ -115,6 +119,8 @@ void setup() {
     println("OSC init failed (disabled): " + e.getMessage());
   }
   loadConfig();
+  currentMode.onModeEnter();
+  sendModeOsc();
   sendStartZones();
   sendAnchors();
   trySerial();
@@ -125,6 +131,7 @@ void draw() {
   if (port == null && millis() - lastPortTry > 2000) trySerial();
   updateTransform();
   if (appMode == MODE_GAME) {
+    updateVirtualTags();
     updateGame();
     sendGameOsc();
   }
@@ -132,11 +139,15 @@ void draw() {
   drawAnchors();
   if (appMode == MODE_GAME) {
     drawStartZones();
-    if (gameState == STATE_PLAYING && coinPos != null) drawCoin();
+    currentMode.drawWorld();
+    drawEntitiesDebug();
   }
   drawTag(TAG0_ID, C_T0, "P1");
   drawTag(TAG1_ID, C_T1, "P2");
-  if (appMode == MODE_GAME) drawHud();
+  if (appMode == MODE_GAME) {
+    drawOobMarkers();
+    drawHud();
+  }
   else setupDraw();   // defined in Setup.pde
 }
 
@@ -172,6 +183,7 @@ void serialEvent(Serial p) {
 }
 
 void handleFrame(Frame f) {
+  if (virtualOn) return;   // virtual players own the tags while enabled
   frames++;
   lastFrameMs = millis();
   seenIds.add(f.tagid);
@@ -212,119 +224,7 @@ void handleFrame(Frame f) {
   }
 }
 
-void sendPos(int tagid, float x, float y) {
-  if (!OSC_ENABLED || osc == null || piAddr == null) return;
-  OscMessage m = new OscMessage(tagid == TAG0_ID ? "/p1/pos" : "/p2/pos");
-  m.add(x);
-  m.add(y);
-  osc.send(m, piAddr);
-  oscSent++;
-}
-
-void sendGameOsc() {
-  if (!OSC_ENABLED || osc == null || piAddr == null) return;
-  if (millis() - lastGameOscMs < OSC_GAME_INTERVAL_MS) return;
-  lastGameOscMs = millis();
-  int tl = (gameState == STATE_READY) ? (int)ceil(timeLeft) : (int)floor(timeLeft);
-  OscMessage stats = new OscMessage("/game/stats");
-  stats.add(gameState);
-  stats.add(tl);
-  stats.add(scoreP1);
-  stats.add(scoreP2);
-  osc.send(stats, piAddr);
-  if (gameState == STATE_PLAYING && coinPos != null) {
-    OscMessage c = new OscMessage("/coin/pos");
-    c.add(coinPos[0]);
-    c.add(coinPos[1]);
-    osc.send(c, piAddr);
-  }
-}
-
-// ============================ GAME LOGIC ============================
-
-void setState(int s) {
-  gameState = s;
-  stateEnteredMs = millis();
-  lastGameOscMs = 0;   // force immediate /game/stats send
-  println("game state -> " + stateName(s));
-}
-
-String stateName(int s) {
-  if (s == STATE_WAIT) return "WAIT";
-  if (s == STATE_PLAYING) return "PLAYING";
-  if (s == STATE_GAMEOVER) return "GAMEOVER";
-  if (s == STATE_READY) return "READY";
-  return "?";
-}
-
-void updateGame() {
-  TagData t0 = tags.get(TAG0_ID);
-  TagData t1 = tags.get(TAG1_ID);
-
-  if (gameState == STATE_WAIT) {
-    timeLeft = 0;
-    if (inZone(t0, P1_START) && inZone(t1, P2_START)) setState(STATE_READY);
-  } else if (gameState == STATE_READY) {
-    timeLeft = max(0, READY_S - (millis() - stateEnteredMs) / 1000.0f);
-    if (!inZone(t0, P1_START) || !inZone(t1, P2_START)) {
-      setState(STATE_WAIT);   // a player left the zone -> abort countdown
-    } else if (timeLeft <= 0) {
-      startRound();
-    }
-  } else if (gameState == STATE_PLAYING) {
-    timeLeft = max(0, GAME_TIME_S - (millis() - stateEnteredMs) / 1000.0f);
-    if (coinPos != null) {
-      if (t0 != null && t0.pos != null && dist(t0.pos.x, t0.pos.y, coinPos[0], coinPos[1]) < COLLECT_RADIUS_MM) {
-        collectCoin(1);
-      } else if (t1 != null && t1.pos != null && dist(t1.pos.x, t1.pos.y, coinPos[0], coinPos[1]) < COLLECT_RADIUS_MM) {
-        collectCoin(2);
-      }
-    }
-    if (timeLeft <= 0) setState(STATE_GAMEOVER);
-  } else if (gameState == STATE_GAMEOVER) {
-    if (millis() - stateEnteredMs > GAMEOVER_S * 1000) setState(STATE_WAIT);
-  }
-}
-
-void startRound() {
-  scoreP1 = 0;
-  scoreP2 = 0;
-  spawnCoin();
-  timeLeft = GAME_TIME_S;
-  setState(STATE_PLAYING);
-}
-
-void collectCoin(int player) {
-  if (player == 1) scoreP1++;
-  else scoreP2++;
-  println("P" + player + " collected coin -> P1:" + scoreP1 + " P2:" + scoreP2);
-  spawnCoin();
-}
-
-void spawnCoin() {
-  float minx = min(AX), maxx = max(AX);
-  float miny = min(AY), maxy = max(AY);
-  TagData t0 = tags.get(TAG0_ID);
-  TagData t1 = tags.get(TAG1_ID);
-  for (int i = 0; i < 100; i++) {
-    float x = random(minx + COIN_MARGIN_MM, maxx - COIN_MARGIN_MM);
-    float y = random(miny + COIN_MARGIN_MM, maxy - COIN_MARGIN_MM);
-    float d0 = (t0 != null && t0.pos != null) ? dist(x, y, t0.pos.x, t0.pos.y) : Float.MAX_VALUE;
-    float d1 = (t1 != null && t1.pos != null) ? dist(x, y, t1.pos.x, t1.pos.y) : Float.MAX_VALUE;
-    if (min(d0, d1) < COIN_MIN_DIST_PLAYER_MM) continue;              // too close to a player
-    if (t0 != null && t1 != null && t0.pos != null && t1.pos != null
-        && abs(d0 - d1) > COIN_FAIR_DIFF_MM) continue;                 // unfair for one player
-    coinPos = new float[] { x, y };
-    return;
-  }
-  // fallback (e.g. no player fix yet): random inside margin box
-  coinPos = new float[] { random(minx + COIN_MARGIN_MM, maxx - COIN_MARGIN_MM),
-                          random(miny + COIN_MARGIN_MM, maxy - COIN_MARGIN_MM) };
-}
-
-boolean inZone(TagData t, float[] zone) {
-  return t != null && t.pos != null && dist(t.pos.x, t.pos.y, zone[0], zone[1]) < START_ZONE_RADIUS_MM;
-}
+// ============================ KEYS ============================
 
 void keyPressed() {
   if (key == CODED && keyCode == SHIFT) {
@@ -339,6 +239,27 @@ void keyPressed() {
     setupKey();   // defined in Setup.pde
     return;
   }
+  if (key == 'v' || key == 'V') {
+    toggleVirtual();
+    return;
+  }
+  if (virtualEnabled() && vKeyDown()) return;   // movement key consumed
+
+  if (key == 'm' || key == 'M') {
+    nextMode();
+    return;
+  }
+  if (key == 'd' || key == 'D') {
+    hudDebug = !hudDebug;
+    println("HUD debug: " + onOff(hudDebug));
+    return;
+  }
+  if (key == 'h' || key == 'H') {
+    hudKeys = !hudKeys;
+    println("HUD key help: " + onOff(hudKeys));
+    return;
+  }
+
   if (key == '1') {
     USE_SPEED_CLAMP = !USE_SPEED_CLAMP;
     println("Speed clamp: " + onOff(USE_SPEED_CLAMP));
@@ -354,9 +275,10 @@ void keyPressed() {
   } else if (key == ' ') {
     // debug: start round immediately, skipping the start-zone check
     if (gameState == STATE_WAIT || gameState == STATE_GAMEOVER) {
-      startRound();
-      println("SPACE: manual round start (debug)");
+      debugStartRound();
     }
+  } else {
+    currentMode.keyPressed(key);   // mode-specific keys
   }
 }
 
@@ -366,6 +288,7 @@ void setAppMode(int m) {
   appMode = m;
   if (m == MODE_GAME) {
     setState(STATE_WAIT);   // clean restart after setup
+    sendModeOsc();
     sendStartZones();
     sendAnchors();
   }
@@ -396,6 +319,8 @@ void loadConfig() {
     if (p1 != null && p1.size() == 2) { P1_START[0] = p1.getFloat(0); P1_START[1] = p1.getFloat(1); }
     JSONArray p2 = j.getJSONArray("P2_START");
     if (p2 != null && p2.size() == 2) { P2_START[0] = p2.getFloat(0); P2_START[1] = p2.getFloat(1); }
+    String modeId = j.getString("MODE");
+    if (modeId != null && !modeId.isEmpty()) applyModeId(modeId);
     println("config loaded: " + dataPath(CONFIG_FILENAME));
   } catch (Exception e) {
     println("config load failed: " + e.getMessage());
@@ -420,6 +345,7 @@ void saveConfig() {
     p2.setFloat(0, P2_START[0]); p2.setFloat(1, P2_START[1]);
     j.setJSONArray("P1_START", p1);
     j.setJSONArray("P2_START", p2);
+    j.setString("MODE", currentMode.id);
     saveJSONObject(j, CONFIG_FILENAME);
     println("config saved: " + dataPath(CONFIG_FILENAME));
   } catch (Exception e) {
@@ -431,28 +357,6 @@ void computeD() {
   for (int i = 0; i < 6; i++) {
     anchorD[i] = dist(AX[D_PAIRS[i][0]], AY[D_PAIRS[i][0]], AX[D_PAIRS[i][1]], AY[D_PAIRS[i][1]]);
   }
-}
-
-void sendStartZones() {
-  if (!OSC_ENABLED || osc == null || piAddr == null) return;
-  OscMessage m1 = new OscMessage("/start/p1");
-  m1.add(P1_START[0]);
-  m1.add(P1_START[1]);
-  osc.send(m1, piAddr);
-  OscMessage m2 = new OscMessage("/start/p2");
-  m2.add(P2_START[0]);
-  m2.add(P2_START[1]);
-  osc.send(m2, piAddr);
-  oscSent += 2;
-}
-
-void sendAnchors() {
-  if (!OSC_ENABLED || osc == null || piAddr == null) return;
-  OscMessage m = new OscMessage("/anchors");
-  for (int i = 0; i < 4; i++) m.add(AX[i]);
-  for (int i = 0; i < 4; i++) m.add(AY[i]);
-  osc.send(m, piAddr);
-  oscSent++;
 }
 
 String onOff(boolean b) {
@@ -558,15 +462,24 @@ void drawZone(float[] p, String label, color c) {
   text(label, q.x, q.y);
 }
 
-void drawCoin() {
-  PVector p = scr(coinPos[0], coinPos[1]);
-  fill(C_COIN);
-  stroke(255);
-  strokeWeight(2);
-  ellipse(p.x, p.y, COIN_SIZE_PX, COIN_SIZE_PX);
-  fill(0);
-  textAlign(CENTER, CENTER);
-  text("$", p.x, p.y + 1);
+void drawOobMarkers() {
+  drawOobMarker(TAG0_ID, 0);
+  drawOobMarker(TAG1_ID, 1);
+}
+
+void drawOobMarker(int id, int idx) {
+  if (!oobActive[idx]) return;
+  TagData t = tags.get(id);
+  if (t == null || t.pos == null) return;
+  PVector p = scr(t.pos.x, t.pos.y);
+  noFill();
+  stroke(255, 60, 60);
+  strokeWeight(4);
+  float r = max(20, 40 * s);
+  ellipse(p.x, p.y, 2 * r, 2 * r);
+  fill(255, 80, 80);
+  textAlign(CENTER, BOTTOM);
+  text("GO BACK! " + (int)ceil(oobCountdown[idx]) + "s", p.x, p.y - r - 4);
 }
 
 void drawTag(int id, color c, String label) {
@@ -598,70 +511,169 @@ void drawTag(int id, color c, String label) {
   }
 }
 
-void drawHud() {
-  textAlign(LEFT, TOP);
-  int y = 10;
-  fill(255, 230, 120);
-  text("GAME: " + stateName(gameState) + "  |  time: " + nf(timeLeft, 0, 0) + "s  |  P1: " + scoreP1 + "  P2: " + scoreP2, 10, y);
-  y += 18;
-  fill(180, 230, 180);
-  text("Filters: Clamp[" + onOff(USE_SPEED_CLAMP) + "]  EMA[" + onOff(USE_EMA) + " a=" + nf(SMOOTH_ALPHA, 0, 2) + "]  |  keys: 1/2 toggle, 4 = alpha, SPACE = start round", 10, y);
-  y += 18;
-  if (port == null) {
-    fill(255, 120, 120);
-    text("Serial: NOT CONNECTED (looking for port containing \"" + PORT_HINT + "\")", 10, y);
-    fill(255);
-    y += 18;
-  } else {
-    text("Serial: " + portName + " @ " + BAUD + "  |  frames: " + frames, 10, y);
-    y += 18;
-  }
+// ============================ HUD ============================
+// Panel layout: scoreboard top-center, warnings below it, player cards on the
+// left/right edges, system status bottom-left, mode info bottom-right and key
+// help top-right (H toggles, D toggles tag debug details).
 
+void drawHud() {
+  textSize(12);
+  textAlign(LEFT, TOP);
+  drawScoreboard();
+  drawWarnings();
+  drawPlayerCard(TAG0_ID, "P1", C_T0, 10, 200);
+  drawPlayerCard(TAG1_ID, "P2", C_T1, width - 10, 200);
+  drawSystemPanel();
+  drawModePanel();
+  if (hudKeys) drawKeyPanel();
+}
+
+// Panel background + title bar. Body text is drawn by the caller.
+void hudPanel(int x, int y, int w, int h, String title, color titleCol) {
+  noStroke();
+  fill(12, 12, 18, 215);
+  rect(x, y, w, h);
+  fill(titleCol);
+  rect(x, y, w, 18);
+  fill(0);
+  text(title, x + 6, y + 3);
+}
+
+color stateColor(int s) {
+  if (s == STATE_WAIT) return color(160, 160, 160);
+  if (s == STATE_READY) return color(255, 230, 120);
+  if (s == STATE_PLAYING) return color(140, 230, 140);
+  if (s == STATE_GAMEOVER) return color(255, 170, 60);
+  return color(255, 255, 255);
+}
+
+void drawScoreboard() {
+  int w = 380, h = 96, x = width / 2 - w / 2, y = 10;
+  hudPanel(x, y, w, h, currentMode.displayName + "  |  " + stateName(gameState), stateColor(gameState));
+  int[] sc = currentMode.scores();
+  textAlign(CENTER, TOP);
+  textSize(30);
+  fill(C_T0);
+  text("P1 " + sc[0], x + w / 2 - 85, y + 22);
+  fill(255);
+  text(":", x + w / 2, y + 24);
+  fill(C_T1);
+  text(sc[1] + " P2", x + w / 2 + 85, y + 22);
+  fill(255, 230, 120);
+  textSize(20);
+  text("time " + nf(timeLeft, 0, 0) + "s", x + w / 2, y + 56);
+  textSize(12);
+  textAlign(LEFT, TOP);
+}
+
+void drawWarnings() {
+  ArrayList<String> warns = new ArrayList<String>();
+  if (!virtualOn && port == null) {
+    warns.add("SERIAL NOT CONNECTED -- searching port \"" + PORT_HINT + "\"");
+  } else if (!virtualOn && millis() - lastFrameMs > 2000) {
+    warns.add("NO TAG DATA FOR >2s");
+  }
   for (Integer i : seenIds) {
     if (i != TAG0_ID && i != TAG1_ID) {
-      fill(255, 200, 80);
-      text("Warning: unknown TagID 0x" + hex(i, 4) + " seen -- check TAG0_ID/TAG1_ID", 10, y);
-      y += 18;
+      warns.add("UNKNOWN TagID 0x" + hex(i, 4) + " -- check TAG0_ID/TAG1_ID");
       break;
     }
   }
+  if (oobActive[0]) warns.add("P1: GO BACK NOW OR LOSE A LIFE (" + (int)ceil(oobCountdown[0]) + "s)");
+  if (oobActive[1]) warns.add("P2: GO BACK NOW OR LOSE A LIFE (" + (int)ceil(oobCountdown[1]) + "s)");
 
-  if (millis() - lastFrameMs > 2000 && port != null) {
-    fill(255, 120, 120);
-    text("No data for >2s", 10, y);
+  int y = 116;
+  for (String w : warns) {
+    boolean flash = w.startsWith("P1:") || w.startsWith("P2:");
+    float a = flash ? (170 + 85 * sin(millis() / 150.0f)) : 215;
+    color c = w.startsWith("UNKNOWN") ? color(255, 160, 40, a) : color(255, 50, 50, a);
+    textSize(14);
+    float tw = textWidth(w);
+    textSize(12);
+    float px = width / 2.0f - tw / 2.0f - 8;
+    noStroke();
+    fill(c);
+    rect(px, y, tw + 16, 22);
     fill(255);
-    y += 18;
+    text(w, px + 8, y + 4);
+    y += 26;
   }
-
-  y += 8;
-  hudTag(y, TAG0_ID, "P1", C_T0);
-  y += 56;
-  hudTag(y, TAG1_ID, "P2", C_T1);
-  fill(150);
-  text("OSC: " + (OSC_ENABLED ? "ON -> " + OSC_TARGET_IP + ":" + OSC_TARGET_PORT + "  sent: " + oscSent : "OFF"), 10, height - 36);
-  text("scale: " + nf(s, 0, 3) + " px/mm  |  grid: 500 mm", 10, height - 18);
 }
 
-void hudTag(int y, int id, String label, color c) {
+void drawPlayerCard(int id, String label, color c, int x, int y) {
+  int w = 240;
+  int px = (x < width / 2) ? x : x - w;
+  int h = hudDebug ? 128 : 66;
+  hudPanel(px, y, w, h, label, c);
   TagData t = tags.get(id);
-  fill(c);
-  text(label, 10, y);
   fill(255);
   if (t == null) {
-    text("no frames yet", 40, y);
+    text("no frames yet", px + 8, y + 24);
     return;
   }
-  String pos = (t.pos != null)
-    ? "pos=(" + nf(t.pos.x, 0, 0) + ", " + nf(t.pos.y, 0, 0) + ") mm  v=" + nf(t.speedMs / 1000.0f, 0, 2) + " m/s"
-    : "pos=-- (no fix, <3 valid distances)";
-  text("tagid=0x" + hex(t.id, 4) + "  " + pos + "  mask=" + binary(t.mask, 8), 40, y);
-  String d = "  ";
-  for (int i = 0; i < 4; i++) {
-    if ((t.mask & (1 << i)) != 0 && t.kalman[i] > 0) d += "A" + i + "=" + t.kalman[i] + "  ";
-    else d += "A" + i + "=--  ";
+  if (t.pos != null) {
+    text("pos  (" + nf(t.pos.x, 0, 0) + ", " + nf(t.pos.y, 0, 0) + ") mm", px + 8, y + 24);
+    text("speed  " + nf(t.speedMs / 1000.0f, 0, 2) + " m/s", px + 8, y + 42);
+  } else {
+    text("pos  -- (no fix, <3 anchors)", px + 8, y + 24);
   }
+  if (!hudDebug) return;
   fill(200);
-  text(d, 40, y + 18);
+  text("tagid 0x" + hex(t.id, 4) + "   mask " + binary(t.mask, 8), px + 8, y + 62);
+  text(anchorStr(t, 0) + "  " + anchorStr(t, 1), px + 8, y + 80);
+  text(anchorStr(t, 2) + "  " + anchorStr(t, 3), px + 8, y + 96);
+  text("trail " + t.trail.size() + "/" + TRAIL_MAX, px + 8, y + 114);
+  fill(255);
+}
+
+String anchorStr(TagData t, int i) {
+  String v = ((t.mask & (1 << i)) != 0 && t.kalman[i] > 0) ? nf(t.kalman[i], 0, 0) : "--";
+  return "A" + i + "=" + v;
+}
+
+void drawSystemPanel() {
+  int w = 360, h = 96, x = 10, y = height - h - 10;
+  hudPanel(x, y, w, h, "SYSTEM", color(180, 200, 220));
+  fill(255);
+  String serial;
+  if (virtualOn) serial = "Virtual players ON (V = off)";
+  else if (port == null) serial = "Serial: NOT CONNECTED";
+  else serial = "Serial: " + portName + " @ " + BAUD;
+  text(serial, x + 8, y + 22);
+  fill(200);
+  text("frames " + frames + "  |  filters: Clamp[" + onOff(USE_SPEED_CLAMP) + "] EMA[" + onOff(USE_EMA) + " a=" + nf(SMOOTH_ALPHA, 0, 2) + "]", x + 8, y + 40);
+  text("OSC " + (OSC_ENABLED ? "ON -> " + OSC_TARGET_IP + ":" + OSC_TARGET_PORT + " sent " + oscSent : "OFF"), x + 8, y + 58);
+  text("scale " + nf(s, 0, 3) + " px/mm   grid 500 mm" + (hudKeys ? "" : "   [H = keys]"), x + 8, y + 76);
+  fill(255);
+}
+
+void drawModePanel() {
+  String[] lines = currentMode.hudLines();
+  if (lines == null || lines.length == 0) return;
+  int w = 250, h = 22 + lines.length * 16 + 8;
+  int x = width - w - 10, y = height - h - 10;
+  hudPanel(x, y, w, h, currentMode.displayName.toUpperCase(), color(220, 180, 255));
+  fill(255);
+  for (int i = 0; i < lines.length; i++) text(lines[i], x + 8, y + 22 + i * 16);
+}
+
+void drawKeyPanel() {
+  String[] lines = {
+    "TAB ........ Setup mode",
+    "M .......... next Mode",
+    "V .......... Virtual players",
+    "SPACE ...... start round (debug)",
+    "1 / 2 ...... filters on/off",
+    "4 .......... EMA alpha",
+    "D .......... tag debug details",
+    "H .......... hide this panel",
+    "WASD / arrows = move virtual P1/P2"
+  };
+  int w = 270, h = 22 + lines.length * 16 + 8;
+  int x = width - w - 10, y = 10;
+  hudPanel(x, y, w, h, "KEYS", color(180, 200, 220));
+  fill(255);
+  for (int i = 0; i < lines.length; i++) text(lines[i], x + 8, y + 22 + i * 16);
 }
 
 class TagData {
