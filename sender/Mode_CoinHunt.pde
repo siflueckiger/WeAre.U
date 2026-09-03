@@ -16,7 +16,7 @@ class ModeCoinHunt extends GameMode {
 
   // --- enemies ---
   int   ENEMY_AFTER_COINS        = 5;      // combined coins before enemies spawn
-  float ENEMY_SPEED_MM_S         = 700;    // chase speed
+  float ENEMY_SPEED_MM_S         = 400;    // chase speed
   float ENEMY_CATCH_RADIUS_MM    = 350;    // touch distance to catch a player
   float ENEMY_MIN_DIST_PLAYER_MM = 1200;   // spawn/respawn away from players
   float ENEMY_VISUAL_MM          = 200;
@@ -32,8 +32,8 @@ class ModeCoinHunt extends GameMode {
   float POWERUP_LIFETIME_S         = 15;   // despawn if not collected
   float POWERUP_COLLECT_RADIUS_MM  = 400;
   float POWERUP_VISUAL_MM          = 200;
-  float MAGNET_RADIUS_MM           = 1500; // collect radius while magnet active
-  float MAGNET_S = 5, INVIS_S = 5, FREEZE_S = 4, DOUBLE_S = 5;
+  float MAGNET_PULL_MM_S           = 700;  // coin drag speed while magnet active
+  float MAGNET_S = 5, INVIS_S = 5, FREEZE_S = 4;
 
   static final int PU_MAGNET = 0, PU_INVIS = 1, PU_FREEZE = 2, PU_DOUBLE = 3, PU_LIFE = 4;
 
@@ -44,8 +44,8 @@ class ModeCoinHunt extends GameMode {
   float[] invuln = new float[2];   // remaining invulnerability seconds
   float[] magnet = new float[2];   // remaining magnet seconds
   float[] invis  = new float[2];   // remaining invisibility seconds
-  float[] doubleT = new float[2];  // remaining double-coin seconds
   float freezeAll = 0;
+  boolean nextCoinDouble = false;  // next coin (by either player) counts double
 
   ArrayList<Enemy> enemies = new ArrayList<Enemy>();
   boolean enemiesSpawned = false;
@@ -72,15 +72,16 @@ class ModeCoinHunt extends GameMode {
       invuln[i] = 0;
       magnet[i] = 0;
       invis[i] = 0;
-      doubleT[i] = 0;
     }
     freezeAll = 0;
+    nextCoinDouble = false;
     powerupTimer = POWERUP_INTERVAL_S;
     spawnCoin();
   }
 
   void update(float dt) {
     tickTimers(dt);
+    updateMagnet(dt);
     updateEnemies(dt);
     updatePowerup(dt);
     if (coin != null) collectCoinCheck();
@@ -115,11 +116,11 @@ class ModeCoinHunt extends GameMode {
     ArrayList<String> lines = new ArrayList<String>();
     lines.add("P1 lives " + lives[0] + "    P2 lives " + lives[1]);
     if (freezeAll > 0) lines.add("ENEMIES FROZEN " + (int)freezeAll + "s");
+    if (nextCoinDouble) lines.add("NEXT COIN x2");
     for (int p = 0; p < 2; p++) {
       String fx = "";
       if (magnet[p] > 0) fx += "MAGNET ";
       if (invis[p] > 0) fx += "INVIS ";
-      if (doubleT[p] > 0) fx += "DOUBLE ";
       if (!fx.isEmpty()) lines.add("P" + (p + 1) + ": " + fx.trim());
     }
     return lines.toArray(new String[0]);
@@ -133,18 +134,40 @@ class ModeCoinHunt extends GameMode {
       invuln[i] = max(0, invuln[i] - dt);
       magnet[i] = max(0, magnet[i] - dt);
       invis[i]  = max(0, invis[i] - dt);
-      doubleT[i] = max(0, doubleT[i] - dt);
     }
   }
 
   // ============================ COINS ============================
 
+  // Magnet drags the coin slowly toward the nearest magnet-active player.
+  void updateMagnet(float dt) {
+    if (coin == null) return;
+    int best = -1;
+    float bestD = Float.MAX_VALUE;
+    for (int p = 0; p < 2; p++) {
+      if (magnet[p] <= 0) continue;
+      TagData t = tags.get(p == 0 ? TAG0_ID : TAG1_ID);
+      if (t == null || t.pos == null) continue;
+      float d = dist(t.pos.x, t.pos.y, coin.x, coin.y);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    if (best < 0) return;
+    TagData t = tags.get(best == 0 ? TAG0_ID : TAG1_ID);
+    float dx = t.pos.x - coin.x;
+    float dy = t.pos.y - coin.y;
+    float d = sqrt(dx * dx + dy * dy);
+    if (d < 1) return;
+    float step = MAGNET_PULL_MM_S * dt;
+    if (step > d) step = d;   // don't overshoot
+    coin.x += dx / d * step;
+    coin.y += dy / d * step;
+  }
+
   void collectCoinCheck() {
     for (int p = 0; p < 2; p++) {
       TagData t = tags.get(p == 0 ? TAG0_ID : TAG1_ID);
       if (t == null || t.pos == null) continue;
-      float radius = (magnet[p] > 0) ? MAGNET_RADIUS_MM : COLLECT_RADIUS_MM;
-      if (dist(t.pos.x, t.pos.y, coin.x, coin.y) < radius) {
+      if (dist(t.pos.x, t.pos.y, coin.x, coin.y) < COLLECT_RADIUS_MM) {
         collectCoin(p);
         break;
       }
@@ -152,7 +175,8 @@ class ModeCoinHunt extends GameMode {
   }
 
   void collectCoin(int player) {
-    int gain = (doubleT[player] > 0) ? 2 : 1;
+    int gain = nextCoinDouble ? 2 : 1;
+    nextCoinDouble = false;
     if (player == 0) scoreP1 += gain;
     else scoreP2 += gain;
     println("P" + (player + 1) + " collected coin (+" + gain + ") -> P1:" + scoreP1 + " P2:" + scoreP2);
@@ -308,7 +332,7 @@ class ModeCoinHunt extends GameMode {
     if (type == PU_MAGNET) magnet[player] = MAGNET_S;
     else if (type == PU_INVIS) invis[player] = INVIS_S;
     else if (type == PU_FREEZE) freezeAll = FREEZE_S;
-    else if (type == PU_DOUBLE) doubleT[player] = DOUBLE_S;
+    else if (type == PU_DOUBLE) nextCoinDouble = true;
     else if (type == PU_LIFE) lives[player] = min(lives[player] + 1, MAX_LIVES);
     println("P" + (player + 1) + " got " + powerupName(type));
   }
