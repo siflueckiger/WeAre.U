@@ -48,9 +48,20 @@ Neue Typen brauchen nur eine zusätzliche Shape in `receiver.py` → `ENTITY_SHA
 
 - **Konstanten müssen in Sender und Receiver übereinstimmen:** GameStates, `START_ZONE_RADIUS_MM`, Startzonen-Defaults (`MUST MATCH`).
 - WAIT → beide Spieler in Startzone → READY (3 s Countdown); verlässt einer die Zone → zurück zu WAIT.
-- PLAYING: Timer läuft ab (`GAME_TIME_S`, aktuell 30), Coin einsammeln bei < `COLLECT_RADIUS_MM` (300) → Score++ + Respawn.
-- Coin-Spawn: 500 mm Feldrand, min. 800 mm Abstand zu Spielern, Fairness `|d1-d2| <= 1200 mm`.
-- GAMEOVER: 10 s Anzeige → automatisch zurück zu WAIT.
+- PLAYING: Timer läuft ab (`GAME_TIME_S`, aktuell 30). GAMEOVER: 10 s Anzeige → automatisch zurück zu WAIT.
+
+## Mode 1 – Coin Hunt (`coinHunt`)
+
+- Münzen einsammeln: `< COLLECT_RADIUS_MM` (300) → Score++; Respawn (Feldrand 500 mm, min. 800 mm zu Spielern, Fairness `|d1-d2| <= 1200 mm`).
+- **Enemies:** nach `ENEMY_AFTER_COINS` (5) gesammelten Münzen (beide Spieler zusammen) spawnen 2 Gegner — Gegner 1 jagt P1, Gegner 2 jagt P2 (`ENEMY_SPEED_MM_S` = 1200).
+- **Lives:** je 3 (`START_LIVES`). Gegner-Berührung (`ENEMY_CATCH_RADIUS_MM` = 350) → −1 Life + 2 s Unverwundbarkeit + Gegner respawnt fern. 0 Lives → Runde endet, der andere gewinnt (`roundWinner`).
+- **Powerups** (spawnen alle `POWERUP_INTERVAL_S` = 8 s, Lebensdauer 15 s): MAGNET (Sammelradius 1500 mm, 5 s), INVIS (eigener Gegner jagt den anderen, 5 s), FREEZE (Gegner stehen, 4 s), DOUBLE (Münzen zählen doppelt, 5 s), LIFE (+1, max 5).
+- HUD via `/hud`: Lives beider Spieler + aktive Effekte.
+
+## Mode-Registry (Sender, M-Taste)
+
+- `M` wechselt den aktiven Mode; wird in `data/config.json` unter `"MODE"` gespeichert.
+- Mode-Wechsel sendet `/game/mode` an die Receiver, setzt State auf WAIT und leert Entities.
 
 ## Out-of-Bounds (`/game/oob`)
 

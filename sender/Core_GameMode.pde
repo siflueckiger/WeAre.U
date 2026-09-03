@@ -37,10 +37,46 @@ abstract class GameMode {
   }
 }
 
-// Mode registry. Phase 3 adds M-key switching + config.json persistence;
-// new modes only need to be appended here.
+// Mode registry. New modes only need to be appended here.
+// M key cycles modes (see keyPressed in sender.pde); active mode is persisted
+// in config.json under "MODE".
 GameMode[] modes = { new ModeCoinHunt() };
 GameMode currentMode = modes[0];
+int modeIndex = 0;
+
+void nextMode() {
+  selectMode((modeIndex + 1) % modes.length);
+}
+
+void selectMode(int idx) {
+  if (idx < 0 || idx >= modes.length || idx == modeIndex) return;
+  modeIndex = idx;
+  currentMode = modes[idx];
+  clearEntities();
+  currentMode.onModeEnter();
+  setState(STATE_WAIT);
+  sendModeOsc();
+  saveConfig();
+  println("mode -> " + currentMode.displayName + " (" + currentMode.id + ")");
+}
+
+GameMode modeById(String id) {
+  for (int i = 0; i < modes.length; i++) {
+    if (modes[i].id.equals(id)) return modes[i];
+  }
+  return null;
+}
+
+// Sets the active mode by id WITHOUT the side effects of selectMode()
+// (used at startup from config.json).
+void applyModeId(String id) {
+  GameMode m = modeById(id);
+  if (m == null) return;
+  for (int i = 0; i < modes.length; i++) {
+    if (modes[i] == m) modeIndex = i;
+  }
+  currentMode = m;
+}
 
 // ============================ ENGINE STATE MACHINE ============================
 

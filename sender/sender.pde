@@ -137,6 +137,7 @@ void draw() {
   if (appMode == MODE_GAME) {
     drawStartZones();
     currentMode.drawWorld();
+    drawEntitiesDebug();
   }
   drawTag(TAG0_ID, C_T0, "P1");
   drawTag(TAG1_ID, C_T1, "P2");
@@ -241,6 +242,11 @@ void keyPressed() {
   }
   if (virtualEnabled() && vKeyDown()) return;   // movement key consumed
 
+  if (key == 'm' || key == 'M') {
+    nextMode();
+    return;
+  }
+
   if (key == '1') {
     USE_SPEED_CLAMP = !USE_SPEED_CLAMP;
     println("Speed clamp: " + onOff(USE_SPEED_CLAMP));
@@ -300,6 +306,8 @@ void loadConfig() {
     if (p1 != null && p1.size() == 2) { P1_START[0] = p1.getFloat(0); P1_START[1] = p1.getFloat(1); }
     JSONArray p2 = j.getJSONArray("P2_START");
     if (p2 != null && p2.size() == 2) { P2_START[0] = p2.getFloat(0); P2_START[1] = p2.getFloat(1); }
+    String modeId = j.getString("MODE");
+    if (modeId != null && !modeId.isEmpty()) applyModeId(modeId);
     println("config loaded: " + dataPath(CONFIG_FILENAME));
   } catch (Exception e) {
     println("config load failed: " + e.getMessage());
@@ -324,6 +332,7 @@ void saveConfig() {
     p2.setFloat(0, P2_START[0]); p2.setFloat(1, P2_START[1]);
     j.setJSONArray("P1_START", p1);
     j.setJSONArray("P2_START", p2);
+    j.setString("MODE", currentMode.id);
     saveJSONObject(j, CONFIG_FILENAME);
     println("config saved: " + dataPath(CONFIG_FILENAME));
   } catch (Exception e) {
@@ -501,7 +510,7 @@ void drawHud() {
   text("Filters: Clamp[" + onOff(USE_SPEED_CLAMP) + "]  EMA[" + onOff(USE_EMA) + " a=" + nf(SMOOTH_ALPHA, 0, 2) + "]  |  keys: 1/2 toggle, 4 = alpha, SPACE = start round", 10, y);
   y += 18;
   fill(180, 200, 220);
-  text("Keys: TAB = Setup  |  V = Virtual-Spieler an/aus  |  SPACE = Runde starten  |  1/2 = Filter  |  4 = Alpha", 10, y);
+  text("Keys: TAB = Setup  |  M = Mode  |  V = Virtual-Spieler  |  SPACE = Runde  |  1/2 = Filter  |  4 = Alpha", 10, y);
   y += 18;
   if (virtualOn) {
     fill(120, 200, 255);
