@@ -11,15 +11,15 @@ class ModeCoinHunt extends GameMode {
   float COIN_MARGIN_MM          = 500;    // spawn distance to field border
   float COIN_MIN_DIST_PLAYER_MM = 800;    // coin not on top of a player
   float COIN_FAIR_DIFF_MM       = 1200;   // fairness: |distP1 - distP2| <= this
-  float COIN_VISUAL_MM          = 200;    // coin size (visual, sent to receiver)
+  float COIN_VISUAL_MM          = 120;    // coin size (visual, sent to receiver)
   color C_COIN = color(255, 220, 40);
 
   // --- enemies ---
   int   ENEMY_AFTER_COINS        = 5;      // combined coins before enemies spawn
-  float ENEMY_SPEED_MM_S         = 1200;   // chase speed
+  float ENEMY_SPEED_MM_S         = 700;    // chase speed
   float ENEMY_CATCH_RADIUS_MM    = 350;    // touch distance to catch a player
   float ENEMY_MIN_DIST_PLAYER_MM = 1200;   // spawn/respawn away from players
-  float ENEMY_VISUAL_MM          = 300;
+  float ENEMY_VISUAL_MM          = 200;
   color C_ENEMY = color(255, 60, 60);
 
   // --- lives ---
@@ -31,7 +31,7 @@ class ModeCoinHunt extends GameMode {
   float POWERUP_INTERVAL_S         = 8;    // time between powerups
   float POWERUP_LIFETIME_S         = 15;   // despawn if not collected
   float POWERUP_COLLECT_RADIUS_MM  = 400;
-  float POWERUP_VISUAL_MM          = 250;
+  float POWERUP_VISUAL_MM          = 200;
   float MAGNET_RADIUS_MM           = 1500; // collect radius while magnet active
   float MAGNET_S = 5, INVIS_S = 5, FREEZE_S = 4, DOUBLE_S = 5;
 
@@ -94,6 +94,21 @@ class ModeCoinHunt extends GameMode {
     if (gameState != STATE_PLAYING) return;
     drawHitboxRing(TAG0_ID, C_T0);
     drawHitboxRing(TAG1_ID, C_T1);
+    drawInvulnBlink(TAG0_ID, 0);
+    drawInvulnBlink(TAG1_ID, 1);
+  }
+
+  // Blink a white ring around an invulnerable player (visible hit feedback).
+  void drawInvulnBlink(int id, int idx) {
+    if (invuln[idx] <= 0) return;
+    if ((millis() / 150) % 2 != 0) return;   // blink on/off
+    TagData t = tags.get(id);
+    if (t == null || t.pos == null) return;
+    PVector p = scr(t.pos.x, t.pos.y);
+    noFill();
+    stroke(255);
+    strokeWeight(3);
+    ellipse(p.x, p.y, 34, 34);
   }
 
   String[] hudLines() {
@@ -217,6 +232,7 @@ class ModeCoinHunt extends GameMode {
     lives[player]--;
     invuln[player] = INVULN_S;
     println("P" + (player + 1) + " caught! lives=" + lives[player]);
+    sendHit(player, INVULN_S);   // flash + blink on the receiver
     float[] pos = randomFarPoint(ENEMY_MIN_DIST_PLAYER_MM);
     en.ent.x = pos[0];
     en.ent.y = pos[1];
@@ -259,6 +275,7 @@ class ModeCoinHunt extends GameMode {
     powerupType = (int)random(5);
     float[] pos = randomFarPoint(COIN_MIN_DIST_PLAYER_MM);
     powerup = spawnEntity("powerup", pos[0], pos[1], POWERUP_VISUAL_MM, powerupColor(powerupType));
+    powerup.label = powerupLabel(powerupType);
     powerupLife = POWERUP_LIFETIME_S;
     println("Powerup spawned: " + powerupName(powerupType));
   }
@@ -269,6 +286,14 @@ class ModeCoinHunt extends GameMode {
     if (type == PU_FREEZE) return color(120, 255, 200);
     if (type == PU_DOUBLE) return color(255, 200, 120);
     return color(255, 120, 200);   // life
+  }
+
+  String powerupLabel(int type) {
+    if (type == PU_MAGNET) return "MAG";
+    if (type == PU_INVIS)  return "INV";
+    if (type == PU_FREEZE) return "FRE";
+    if (type == PU_DOUBLE) return "DOU";
+    return "LIF";
   }
 
   String powerupName(int type) {

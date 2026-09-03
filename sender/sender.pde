@@ -556,6 +556,12 @@ void drawHud() {
     y += 18;
   }
 
+  for (String l : currentMode.hudLines()) {
+    fill(255, 255, 255);
+    text(l, 10, y);
+    y += 18;
+  }
+
   y += 8;
   hudTag(y, TAG0_ID, "P1", C_T0);
   y += 56;

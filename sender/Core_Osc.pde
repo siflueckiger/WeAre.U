@@ -20,6 +20,16 @@ void sendModeOsc() {
   oscSent++;
 }
 
+// A player was hit (e.g. caught by an enemy). Receiver flashes + blinks them.
+void sendHit(int player, float seconds) {
+  if (!OSC_ENABLED || osc == null || piAddr == null) return;
+  OscMessage m = new OscMessage("/game/hit");
+  m.add(player);
+  m.add(seconds);
+  osc.send(m, piAddr);
+  oscSent++;
+}
+
 void sendGameOsc() {
   if (!OSC_ENABLED || osc == null || piAddr == null) return;
   if (millis() - lastGameOscMs < OSC_GAME_INTERVAL_MS) return;
@@ -92,6 +102,7 @@ void sendEntitiesOsc() {
       u.add(red(e.c));
       u.add(green(e.c));
       u.add(blue(e.c));
+      u.add(e.label);
       osc.send(u, piAddr);
       e.needsUpsert = false;
     }

@@ -10,13 +10,14 @@
 | --- | --- | --- | --- |
 | `/p1/pos` | x, y (mm) | pro Frame | Position Spieler 1 (Tag `0x0000`) |
 | `/p2/pos` | x, y (mm) | pro Frame | Position Spieler 2 (Tag `0x0001`) |
-| `/ent/upsert` | id, type, x, y, radius, r, g, b | bei Spawn/Änderung | Entity anlegen/aktualisieren |
+| `/ent/upsert` | id, type, x, y, radius, r, g, b, label | bei Spawn/Änderung | Entity anlegen/aktualisieren (`label` optional) |
 | `/ent/pos` | id, x, y (mm) | 100 ms (10 Hz) | Entity-Position (bewegte Entities) |
 | `/ent/remove` | id | bei Despawn | Entity entfernen |
 | `/game/stats` | state, time_left, p1_score, p2_score, winner | 100 ms + sofort bei State-Wechsel | Game-Status; `winner` = -1 (aus Scores ableiten), 1 oder 2 (erzwungen) |
 | `/game/oob` | player (0=P1, 1=P2), seconds_left, active (0/1) | 100 ms | Out-of-bounds-Warnung + Countdown |
 | `/game/mode` | mode_id, display_name (Strings) | bei Start/Mode-Wechsel | aktiver Modus |
 | `/game/result` | title, subtitle (Strings) | während GAMEOVER | Ergebnis-Anzeige (ersetzt hartkodierten Gewinnertext) |
+| `/game/hit` | player (0=P1, 1=P2), seconds | bei Treffer | Roter Blitz + Blinken des getroffenen Spielers |
 | `/hud` | line1, line2, … (Strings) | 100 ms (nur PLAYING) | modusspezifischer HUD-Text |
 | `/start/p1` | x, y (mm) | bei Config-Änderung/Start/Mode-Wechsel | Startzone P1 |
 | `/start/p2` | x, y (mm) | bei Config-Änderung/Start/Mode-Wechsel | Startzone P2 |

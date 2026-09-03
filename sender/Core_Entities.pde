@@ -25,6 +25,7 @@ class Entity {
   float x, y;       // mm
   float radius;     // mm (visual size; hitboxes are mode-side)
   color c;
+  String label = "";   // optional short label rendered on the entity
   boolean visible = true;
   boolean needsUpsert = true;   // send /ent/upsert on next sync
 
@@ -80,6 +81,11 @@ void drawEntitiesDebug() {
       fill(e.c); stroke(255); strokeWeight(2); rect(p.x - r, p.y - r, 2 * r, 2 * r);
     } else {
       fill(e.c); stroke(255); strokeWeight(2); ellipse(p.x, p.y, 2 * r, 2 * r);
+    }
+    if (!e.label.isEmpty()) {
+      fill(255);
+      textAlign(CENTER, CENTER);
+      text(e.label, p.x, p.y);
     }
   }
 }

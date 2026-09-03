@@ -49,13 +49,14 @@ game_state = STATE_WAIT
 time_left = 0
 p1_score = 0
 p2_score = 0
-entities = {}             # entity_id -> {"type","x","y","radius","color"}
+entities = {}             # entity_id -> {"type","x","y","radius","color","label"}
 oob = {0: None, 1: None}   # player_index -> (seconds_left, active) or None
 winner = -1                # -1 = derive from scores, 1/2 = forced winner
 mode_name = ""
 hud_lines = []
 result_title = None
 result_subtitle = None
+hit_until = {0: 0, 1: 0}   # player_index -> tick time when hit flash/blink ends
 clock = pygame.time.Clock()
 font = None
 font_small = None
@@ -117,7 +118,8 @@ def entity_upsert_handler(address, *args):
     y = float(args[3])
     radius = float(args[4])
     color = (int(args[5]), int(args[6]), int(args[7]))
-    entities[eid] = {"type": typ, "x": x, "y": y, "radius": radius, "color": color}
+    label = str(args[8]) if len(args) >= 9 else ""
+    entities[eid] = {"type": typ, "x": x, "y": y, "radius": radius, "color": color, "label": label}
 
 
 def entity_pos_handler(address, *args):
@@ -155,6 +157,14 @@ def result_handler(address, *args):
         return
     result_title = str(args[0])
     result_subtitle = str(args[1])
+
+
+def hit_handler(address, *args):
+    if len(args) < 2:
+        return
+    player = int(args[0])
+    seconds = float(args[1])
+    hit_until[player] = pygame.time.get_ticks() + int(seconds * 1000)
 
 
 def anchors_handler(address, *args):
@@ -198,6 +208,7 @@ def start_osc():
     dispatcher.map("/game/oob", oob_handler)
     dispatcher.map("/game/mode", mode_handler)
     dispatcher.map("/game/result", result_handler)
+    dispatcher.map("/game/hit", hit_handler)
     dispatcher.map("/hud", hud_handler)
     dispatcher.map("/start/p1", make_start_handler(P1_START))
     dispatcher.map("/start/p2", make_start_handler(P2_START))
@@ -262,7 +273,7 @@ def draw_anchors(surface, s, ox, oy):
         surface.blit(label, label.get_rect(center=(p[0], p[1] - 10)))
 
 
-def draw_tag(surface, layer, tag_id, color, label, s, ox, oy):
+def draw_tag(surface, layer, tag_id, color, label, s, ox, oy, blink=False):
     t = tags.get(tag_id)
     if t is None:
         return
@@ -272,7 +283,7 @@ def draw_tag(surface, layer, tag_id, color, label, s, ox, oy):
             b = scr(t.trail[i][0], t.trail[i][1], s, ox, oy)
             f = int(15 + (i - 1) * (200 - 15) / max(1, len(t.trail) - 2))
             pygame.draw.line(layer, (*color, f), a, b, 2)
-    if t.pos is not None:
+    if t.pos is not None and not blink:
         p = scr(t.pos[0], t.pos[1], s, ox, oy)
         pygame.draw.circle(surface, color, p, 7)
         pygame.draw.circle(surface, (255, 255, 255), p, 7, 2)
@@ -336,6 +347,7 @@ def draw_entities(surface, s, ox, oy):
         x, y = scr(e["x"], e["y"], s, ox, oy)
         r = max(2, int(e["radius"] * s))
         color = e["color"]
+        label = e.get("label", "")
         typ = ENTITY_SHAPES.get(e["type"], "circle")
         if typ == "square":
             pygame.draw.rect(surface, color, (x - r, y - r, 2 * r, 2 * r))
@@ -346,6 +358,9 @@ def draw_entities(surface, s, ox, oy):
         else:  # circle
             pygame.draw.circle(surface, color, (x, y), r)
             pygame.draw.circle(surface, (255, 255, 255), (x, y), r, 2)
+        if label:
+            ls = font_small.render(label, True, (255, 255, 255))
+            surface.blit(ls, ls.get_rect(center=(x, y)))
 
 
 def draw_game_hud(surface):
@@ -404,6 +419,24 @@ def draw_oob_warning(surface):
         surface.blit(surf, rect)
 
 
+def draw_hit_flash(surface):
+    now = pygame.time.get_ticks()
+    if not any(now < hit_until.get(p, 0) for p in (0, 1)):
+        return
+    overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+    overlay.fill((255, 0, 0, 50))
+    surface.blit(overlay, (0, 0))
+
+
+def is_blinking(tag_id):
+    now = pygame.time.get_ticks()
+    if tag_id == 0x0000:
+        return now < hit_until.get(0, 0) and (now // 150) % 2 == 0
+    if tag_id == 0x0001:
+        return now < hit_until.get(1, 0) and (now // 150) % 2 == 0
+    return False
+
+
 def render_eye(surface, s, ox, oy, draw_debug_hud):
     surface.fill((22, 22, 22))
     draw_grid(surface, s, ox, oy)
@@ -412,7 +445,7 @@ def render_eye(surface, s, ox, oy, draw_debug_hud):
     for tag_id in tags:
         color = tag_color(tag_id)
         label = "P1" if tag_id == 0x0000 else ("P2" if tag_id == 0x0001 else f"0x{tag_id:04X}")
-        draw_tag(surface, layer, tag_id, color, label, s, ox, oy)
+        draw_tag(surface, layer, tag_id, color, label, s, ox, oy, blink=is_blinking(tag_id))
     surface.blit(layer, (0, 0))
     if game_state in (STATE_WAIT, STATE_READY):
         draw_start_zones(surface, s, ox, oy)
@@ -421,6 +454,7 @@ def render_eye(surface, s, ox, oy, draw_debug_hud):
         draw_game_hud(surface)
     draw_game_overlay(surface)
     draw_oob_warning(surface)
+    draw_hit_flash(surface)
     if draw_debug_hud:
         draw_hud(surface, s)
 
