@@ -46,9 +46,14 @@ Die Evolution von *WeAre*. Spieler tragen VR-Headsets (Raspberry Pi) und UWB-Tag
 WeAre.U/
 ├── README.md              ← diese Datei
 ├── PROJECT-LOG.md         ← Projekt-Historie
-├── sender/                ← Processing-Sketch (Game-Logik + OSC-Sender)
-│   ├── sender.pde
-│   └── Setup.pde          ← Setup-Modus (Anchor-Kalibrierung, Startzonen)
+├── sender/                ← Processing-Sketch (Engine-Shell + Game-Modes + OSC-Sender)
+│   ├── sender.pde         ← Engine: Serial/UWB, Trilateration, Filter, Rendering, HUD
+│   ├── Setup.pde          ← Setup-Modus (Anchor-Kalibrierung, Startzonen)
+│   ├── Core_GameMode.pde  ← GameMode-Interface + Engine-State-Machine (WAIT/READY/PLAYING/GAMEOVER)
+│   ├── Core_Entities.pde  ← gemeinsame Helper (fieldBounds, inZone)
+│   ├── Core_Osc.pde       ← OSC-Send-Funktionen
+│   ├── Mode_CoinHunt.pde  ← Mode 1: Coin Hunt
+│   └── VirtualTags.pde    ← virtueller Spielmodus (WASD/Arrow-Keys, Debug ohne Hardware)
 ├── receiver/              ← Pygame-Receiver für VR-Headsets
 │   ├── receiver.py
 │   └── requirements.txt

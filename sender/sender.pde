@@ -41,11 +41,7 @@ int STATE_PLAYING  = 1;   // round running
 int STATE_GAMEOVER = 2;   // winner screen, auto restart
 int STATE_READY    = 3;   // countdown before round start
 
-int GAME_TIME_S             = 30;    // round duration in seconds
-float COLLECT_RADIUS_MM     = 500;    // distance to pick up the coin
-float COIN_MARGIN_MM        = 500;    // coin spawn: distance to field border
-float COIN_MIN_DIST_PLAYER_MM = 800;  // coin must not spawn on top of a player
-float COIN_FAIR_DIFF_MM     = 1200;   // fairness: |distP1 - distP2| <= this
+int GAME_TIME_S             = 30;    // round duration in seconds (engine-owned)
 float READY_S               = 3;      // countdown length
 float GAMEOVER_S            = 10;     // winner screen length
 float START_ZONE_RADIUS_MM  = 250;    // radius a player must be within
@@ -55,9 +51,7 @@ float START_ZONE_RADIUS_MM  = 250;    // radius a player must be within
 float[] P1_START = { 3000, 1500 };
 float[] P2_START = { 4000, 1500 };
 
-color C_COIN = color(255, 220, 40);
-int COIN_SIZE_PX = 14;
-int OSC_GAME_INTERVAL_MS = 100;       // coin + stats send rate
+int OSC_GAME_INTERVAL_MS = 100;       // stats + entity send rate
 
 // ============================ SETUP MODE ============================
 // App modes: TAB toggles between game and interactive setup.
@@ -93,18 +87,19 @@ int oscSent = 0;
 
 float s = 1, ox = 0, oy = 0;
 
-// game state
+// game state (engine-owned; mode state lives in the Mode_* classes)
 int gameState = STATE_WAIT;
-int scoreP1 = 0, scoreP2 = 0;
 float timeLeft = 0;
 long stateEnteredMs = 0;
-float[] coinPos = null;
+long lastTickMs = 0;
 long lastGameOscMs = 0;
+long appStartMs = 0;
 
 int appMode = MODE_GAME;
 
 void setup() {
   size(1000, 800);
+  appStartMs = millis();
   try {
     osc = new OscP5(this, OSC_LOCAL_PORT);
     piAddr = new NetAddress(OSC_TARGET_IP, OSC_TARGET_PORT);
@@ -115,6 +110,7 @@ void setup() {
     println("OSC init failed (disabled): " + e.getMessage());
   }
   loadConfig();
+  currentMode.onModeEnter();
   sendStartZones();
   sendAnchors();
   trySerial();
@@ -125,6 +121,7 @@ void draw() {
   if (port == null && millis() - lastPortTry > 2000) trySerial();
   updateTransform();
   if (appMode == MODE_GAME) {
+    updateVirtualTags();
     updateGame();
     sendGameOsc();
   }
@@ -132,7 +129,7 @@ void draw() {
   drawAnchors();
   if (appMode == MODE_GAME) {
     drawStartZones();
-    if (gameState == STATE_PLAYING && coinPos != null) drawCoin();
+    currentMode.drawWorld();
   }
   drawTag(TAG0_ID, C_T0, "P1");
   drawTag(TAG1_ID, C_T1, "P2");
@@ -149,6 +146,11 @@ void trySerial() {
         port = new Serial(this, p, BAUD);
         portName = p;
         println("connected: " + p);
+        if (virtualAutoEngaged) {
+          virtualOn = false;
+          virtualAutoEngaged = false;
+          println("serial connected -- virtual play mode off");
+        }
       } catch (Exception e) {
         port = null;
         println("failed to open " + p + ": " + e.getMessage());
@@ -172,6 +174,7 @@ void serialEvent(Serial p) {
 }
 
 void handleFrame(Frame f) {
+  if (virtualOn) return;   // virtual players own the tags while enabled
   frames++;
   lastFrameMs = millis();
   seenIds.add(f.tagid);
@@ -212,119 +215,7 @@ void handleFrame(Frame f) {
   }
 }
 
-void sendPos(int tagid, float x, float y) {
-  if (!OSC_ENABLED || osc == null || piAddr == null) return;
-  OscMessage m = new OscMessage(tagid == TAG0_ID ? "/p1/pos" : "/p2/pos");
-  m.add(x);
-  m.add(y);
-  osc.send(m, piAddr);
-  oscSent++;
-}
-
-void sendGameOsc() {
-  if (!OSC_ENABLED || osc == null || piAddr == null) return;
-  if (millis() - lastGameOscMs < OSC_GAME_INTERVAL_MS) return;
-  lastGameOscMs = millis();
-  int tl = (gameState == STATE_READY) ? (int)ceil(timeLeft) : (int)floor(timeLeft);
-  OscMessage stats = new OscMessage("/game/stats");
-  stats.add(gameState);
-  stats.add(tl);
-  stats.add(scoreP1);
-  stats.add(scoreP2);
-  osc.send(stats, piAddr);
-  if (gameState == STATE_PLAYING && coinPos != null) {
-    OscMessage c = new OscMessage("/coin/pos");
-    c.add(coinPos[0]);
-    c.add(coinPos[1]);
-    osc.send(c, piAddr);
-  }
-}
-
-// ============================ GAME LOGIC ============================
-
-void setState(int s) {
-  gameState = s;
-  stateEnteredMs = millis();
-  lastGameOscMs = 0;   // force immediate /game/stats send
-  println("game state -> " + stateName(s));
-}
-
-String stateName(int s) {
-  if (s == STATE_WAIT) return "WAIT";
-  if (s == STATE_PLAYING) return "PLAYING";
-  if (s == STATE_GAMEOVER) return "GAMEOVER";
-  if (s == STATE_READY) return "READY";
-  return "?";
-}
-
-void updateGame() {
-  TagData t0 = tags.get(TAG0_ID);
-  TagData t1 = tags.get(TAG1_ID);
-
-  if (gameState == STATE_WAIT) {
-    timeLeft = 0;
-    if (inZone(t0, P1_START) && inZone(t1, P2_START)) setState(STATE_READY);
-  } else if (gameState == STATE_READY) {
-    timeLeft = max(0, READY_S - (millis() - stateEnteredMs) / 1000.0f);
-    if (!inZone(t0, P1_START) || !inZone(t1, P2_START)) {
-      setState(STATE_WAIT);   // a player left the zone -> abort countdown
-    } else if (timeLeft <= 0) {
-      startRound();
-    }
-  } else if (gameState == STATE_PLAYING) {
-    timeLeft = max(0, GAME_TIME_S - (millis() - stateEnteredMs) / 1000.0f);
-    if (coinPos != null) {
-      if (t0 != null && t0.pos != null && dist(t0.pos.x, t0.pos.y, coinPos[0], coinPos[1]) < COLLECT_RADIUS_MM) {
-        collectCoin(1);
-      } else if (t1 != null && t1.pos != null && dist(t1.pos.x, t1.pos.y, coinPos[0], coinPos[1]) < COLLECT_RADIUS_MM) {
-        collectCoin(2);
-      }
-    }
-    if (timeLeft <= 0) setState(STATE_GAMEOVER);
-  } else if (gameState == STATE_GAMEOVER) {
-    if (millis() - stateEnteredMs > GAMEOVER_S * 1000) setState(STATE_WAIT);
-  }
-}
-
-void startRound() {
-  scoreP1 = 0;
-  scoreP2 = 0;
-  spawnCoin();
-  timeLeft = GAME_TIME_S;
-  setState(STATE_PLAYING);
-}
-
-void collectCoin(int player) {
-  if (player == 1) scoreP1++;
-  else scoreP2++;
-  println("P" + player + " collected coin -> P1:" + scoreP1 + " P2:" + scoreP2);
-  spawnCoin();
-}
-
-void spawnCoin() {
-  float minx = min(AX), maxx = max(AX);
-  float miny = min(AY), maxy = max(AY);
-  TagData t0 = tags.get(TAG0_ID);
-  TagData t1 = tags.get(TAG1_ID);
-  for (int i = 0; i < 100; i++) {
-    float x = random(minx + COIN_MARGIN_MM, maxx - COIN_MARGIN_MM);
-    float y = random(miny + COIN_MARGIN_MM, maxy - COIN_MARGIN_MM);
-    float d0 = (t0 != null && t0.pos != null) ? dist(x, y, t0.pos.x, t0.pos.y) : Float.MAX_VALUE;
-    float d1 = (t1 != null && t1.pos != null) ? dist(x, y, t1.pos.x, t1.pos.y) : Float.MAX_VALUE;
-    if (min(d0, d1) < COIN_MIN_DIST_PLAYER_MM) continue;              // too close to a player
-    if (t0 != null && t1 != null && t0.pos != null && t1.pos != null
-        && abs(d0 - d1) > COIN_FAIR_DIFF_MM) continue;                 // unfair for one player
-    coinPos = new float[] { x, y };
-    return;
-  }
-  // fallback (e.g. no player fix yet): random inside margin box
-  coinPos = new float[] { random(minx + COIN_MARGIN_MM, maxx - COIN_MARGIN_MM),
-                          random(miny + COIN_MARGIN_MM, maxy - COIN_MARGIN_MM) };
-}
-
-boolean inZone(TagData t, float[] zone) {
-  return t != null && t.pos != null && dist(t.pos.x, t.pos.y, zone[0], zone[1]) < START_ZONE_RADIUS_MM;
-}
+// ============================ KEYS ============================
 
 void keyPressed() {
   if (key == CODED && keyCode == SHIFT) {
@@ -339,6 +230,12 @@ void keyPressed() {
     setupKey();   // defined in Setup.pde
     return;
   }
+  if (key == 'v' || key == 'V') {
+    toggleVirtual();
+    return;
+  }
+  if (virtualEnabled() && vKeyDown()) return;   // movement key consumed
+
   if (key == '1') {
     USE_SPEED_CLAMP = !USE_SPEED_CLAMP;
     println("Speed clamp: " + onOff(USE_SPEED_CLAMP));
@@ -354,9 +251,10 @@ void keyPressed() {
   } else if (key == ' ') {
     // debug: start round immediately, skipping the start-zone check
     if (gameState == STATE_WAIT || gameState == STATE_GAMEOVER) {
-      startRound();
-      println("SPACE: manual round start (debug)");
+      debugStartRound();
     }
+  } else {
+    currentMode.keyPressed(key);   // mode-specific keys
   }
 }
 
@@ -431,28 +329,6 @@ void computeD() {
   for (int i = 0; i < 6; i++) {
     anchorD[i] = dist(AX[D_PAIRS[i][0]], AY[D_PAIRS[i][0]], AX[D_PAIRS[i][1]], AY[D_PAIRS[i][1]]);
   }
-}
-
-void sendStartZones() {
-  if (!OSC_ENABLED || osc == null || piAddr == null) return;
-  OscMessage m1 = new OscMessage("/start/p1");
-  m1.add(P1_START[0]);
-  m1.add(P1_START[1]);
-  osc.send(m1, piAddr);
-  OscMessage m2 = new OscMessage("/start/p2");
-  m2.add(P2_START[0]);
-  m2.add(P2_START[1]);
-  osc.send(m2, piAddr);
-  oscSent += 2;
-}
-
-void sendAnchors() {
-  if (!OSC_ENABLED || osc == null || piAddr == null) return;
-  OscMessage m = new OscMessage("/anchors");
-  for (int i = 0; i < 4; i++) m.add(AX[i]);
-  for (int i = 0; i < 4; i++) m.add(AY[i]);
-  osc.send(m, piAddr);
-  oscSent++;
 }
 
 String onOff(boolean b) {
@@ -558,17 +434,6 @@ void drawZone(float[] p, String label, color c) {
   text(label, q.x, q.y);
 }
 
-void drawCoin() {
-  PVector p = scr(coinPos[0], coinPos[1]);
-  fill(C_COIN);
-  stroke(255);
-  strokeWeight(2);
-  ellipse(p.x, p.y, COIN_SIZE_PX, COIN_SIZE_PX);
-  fill(0);
-  textAlign(CENTER, CENTER);
-  text("$", p.x, p.y + 1);
-}
-
 void drawTag(int id, color c, String label) {
   TagData t = tags.get(id);
   float alphaBase = 255;
@@ -601,13 +466,20 @@ void drawTag(int id, color c, String label) {
 void drawHud() {
   textAlign(LEFT, TOP);
   int y = 10;
+  int[] sc = currentMode.scores();
   fill(255, 230, 120);
-  text("GAME: " + stateName(gameState) + "  |  time: " + nf(timeLeft, 0, 0) + "s  |  P1: " + scoreP1 + "  P2: " + scoreP2, 10, y);
+  text("MODE: " + currentMode.displayName + "  |  GAME: " + stateName(gameState)
+       + "  |  time: " + nf(timeLeft, 0, 0) + "s  |  P1: " + sc[0] + "  P2: " + sc[1], 10, y);
   y += 18;
   fill(180, 230, 180);
   text("Filters: Clamp[" + onOff(USE_SPEED_CLAMP) + "]  EMA[" + onOff(USE_EMA) + " a=" + nf(SMOOTH_ALPHA, 0, 2) + "]  |  keys: 1/2 toggle, 4 = alpha, SPACE = start round", 10, y);
   y += 18;
-  if (port == null) {
+  if (virtualOn) {
+    fill(120, 200, 255);
+    text("Virtual play: WASD = P1, arrows = P2, V = off", 10, y);
+    fill(255);
+    y += 18;
+  } else if (port == null) {
     fill(255, 120, 120);
     text("Serial: NOT CONNECTED (looking for port containing \"" + PORT_HINT + "\")", 10, y);
     fill(255);

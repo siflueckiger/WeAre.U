@@ -15,7 +15,11 @@ boolean shiftHeld = false;   // set in keyPressed()/keyReleased() (main tab)
 String distInput = "";       // typed digits for the selected distance
 
 void keyReleased() {
-  if (key == CODED && keyCode == SHIFT) shiftHeld = false;
+  if (key == CODED && keyCode == SHIFT) {
+    shiftHeld = false;
+    return;
+  }
+  vKeyUp();   // defined in VirtualTags.pde (virtual play mode)
 }
 
 void setupDraw() {
