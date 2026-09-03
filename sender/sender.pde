@@ -98,7 +98,6 @@ float timeLeft = 0;
 long stateEnteredMs = 0;
 long lastTickMs = 0;
 long lastGameOscMs = 0;
-long appStartMs = 0;
 float[] oobCountdown = { OOB_TIMEOUT_S, OOB_TIMEOUT_S };
 boolean[] oobActive = { false, false };
 int roundWinner = -1;   // -1 = derive from scores, 1/2 = forced winner
@@ -107,7 +106,6 @@ int appMode = MODE_GAME;
 
 void setup() {
   size(1000, 800);
-  appStartMs = millis();
   try {
     osc = new OscP5(this, OSC_LOCAL_PORT);
     piAddr = new NetAddress(OSC_TARGET_IP, OSC_TARGET_PORT);
@@ -157,11 +155,6 @@ void trySerial() {
         port = new Serial(this, p, BAUD);
         portName = p;
         println("connected: " + p);
-        if (virtualAutoEngaged) {
-          virtualOn = false;
-          virtualAutoEngaged = false;
-          println("serial connected -- virtual play mode off");
-        }
       } catch (Exception e) {
         port = null;
         println("failed to open " + p + ": " + e.getMessage());
@@ -246,14 +239,6 @@ void keyPressed() {
     return;
   }
   if (virtualEnabled() && vKeyDown()) return;   // movement key consumed
-
-  if (key == 'o' || key == 'O') {
-    if (virtualEnabled()) {
-      oobSim = !oobSim;
-      println("OOB simulation (P1): " + onOff(oobSim));
-    }
-    return;
-  }
 
   if (key == '1') {
     USE_SPEED_CLAMP = !USE_SPEED_CLAMP;
@@ -518,7 +503,7 @@ void drawHud() {
   y += 18;
   if (virtualOn) {
     fill(120, 200, 255);
-    text("Virtual-Spieler AN: WASD = P1, Pfeiltasten = P2  (V = aus  |  O = OOB-Simulation P1)", 10, y);
+    text("Virtual-Spieler AN: WASD = P1, Pfeiltasten = P2  (V = aus)", 10, y);
     fill(255);
     y += 18;
   } else if (port == null) {

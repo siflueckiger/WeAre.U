@@ -3,19 +3,15 @@
 // the SAME TagData pipeline the serial frames use. Modes can't tell the
 // difference between UWB data and virtual players.
 //
-// Controls:  WASD = P1, arrow keys = P2, V = toggle
-// Auto-engage: if no serial port is found within VIRTUAL_AUTO_AFTER_MS after
-// startup, virtual mode switches on by itself. It disengages again as soon
-// as a serial port connects.
+// Controls:  WASD = P1, arrow keys = P2, V = toggle active/virtual
+// V switches between the real UWB stream (active) and simulated players
+// (virtual). While virtual is on, serial frames are ignored and vice versa.
+// Players can walk out of the anchor field -- the engine's out-of-bounds
+// warning kicks in (see Core_GameMode.pde).
 
-boolean VIRTUAL_AUTO         = true;
-int     VIRTUAL_AUTO_AFTER_MS = 5000;
-float   VIRTUAL_SPEED_MM_S    = 1500;    // walking speed
-int     VIRTUAL_EDGE_MARGIN_MM = 200;    // keep players inside the field
+float VIRTUAL_SPEED_MM_S = 1500;    // walking speed
 
 boolean virtualOn = false;
-boolean virtualAutoEngaged = false;
-boolean oobSim = false;       // debug: hold P1 outside the field (O key) to test the warning
 long virtualLastMs = 0;
 HashSet<Character> vKeys = new HashSet<Character>();
 HashSet<Integer> vCodes = new HashSet<Integer>();
@@ -26,12 +22,13 @@ boolean virtualEnabled() {
 
 void toggleVirtual() {
   virtualOn = !virtualOn;
-  virtualAutoEngaged = false;   // manual toggle overrides the auto decision
-  if (virtualOn) resetVirtualPlayers();
+  if (virtualOn) ensureVirtualPlayers();
   println("Virtual play: " + onOff(virtualOn) + " (WASD = P1, arrows = P2)");
 }
 
-void resetVirtualPlayers() {
+// Fill in positions only if a player has none yet -- never snap existing
+// positions back to the start zones.
+void ensureVirtualPlayers() {
   virtualLastMs = 0;
   for (int i = 0; i < 2; i++) {
     int id = (i == 0) ? TAG0_ID : TAG1_ID;
@@ -41,27 +38,18 @@ void resetVirtualPlayers() {
       t = new TagData(id);
       tags.put(id, t);
     }
-    t.pos = new PVector(start[0], start[1]);
-    t.speedMs = 0;
-    t.trail.clear();
-    t.lastFixMs = millis();
-    sendPos(id, t.pos.x, t.pos.y);
+    if (t.pos == null) {
+      t.pos = new PVector(start[0], start[1]);
+      t.speedMs = 0;
+      t.lastFixMs = millis();
+      sendPos(id, t.pos.x, t.pos.y);
+    }
   }
 }
 
 void updateVirtualTags() {
   if (appMode != MODE_GAME) return;
-
-  if (!virtualOn) {
-    if (VIRTUAL_AUTO && !virtualAutoEngaged && port == null
-        && millis() - appStartMs > VIRTUAL_AUTO_AFTER_MS) {
-      virtualOn = true;
-      virtualAutoEngaged = true;
-      resetVirtualPlayers();
-      println("Virtual play auto-engaged (no serial port found)");
-    }
-    return;
-  }
+  if (!virtualOn) return;
 
   long now = millis();
   if (virtualLastMs == 0) virtualLastMs = now;
@@ -71,28 +59,8 @@ void updateVirtualTags() {
   if (dt > 0.25f) dt = 0.25f;
 
   lastFrameMs = now;   // keep HUD "no data" warning + tag fade quiet
-  if (oobSim) {
-    forceOob(TAG0_ID);
-    moveVirtual(TAG1_ID, UP, DOWN, LEFT, RIGHT, dt);
-  } else {
-    moveVirtual(TAG0_ID, 'w', 's', 'a', 'd', dt);
-    moveVirtual(TAG1_ID, UP, DOWN, LEFT, RIGHT, dt);
-  }
-}
-
-// Debug: park P1 just outside the field so the out-of-bounds warning + countdown
-// can be tested without hardware. Bypasses the field clamp.
-void forceOob(int id) {
-  TagData t = tags.get(id);
-  if (t == null || t.pos == null) return;
-  float[] b = fieldBounds();
-  t.pos.x = b[0] - OOB_MARGIN_MM - 600;
-  t.pos.y = (b[2] + b[3]) / 2;
-  t.speedMs = 0;
-  t.trail.add(t.pos.copy());
-  if (t.trail.size() > TRAIL_MAX) t.trail.remove(0);
-  t.lastFixMs = millis();
-  sendPos(id, t.pos.x, t.pos.y);
+  moveVirtual(TAG0_ID, 'w', 's', 'a', 'd', dt);
+  moveVirtual(TAG1_ID, UP, DOWN, LEFT, RIGHT, dt);
 }
 
 void moveVirtual(int id, int upK, int downK, int leftK, int rightK, float dt) {
@@ -111,9 +79,8 @@ void moveVirtual(int id, int upK, int downK, int leftK, int rightK, float dt) {
     speed = VIRTUAL_SPEED_MM_S;
     t.pos.x += dir.x * speed * dt;
     t.pos.y += dir.y * speed * dt;
-    float[] b = fieldBounds();
-    t.pos.x = constrain(t.pos.x, b[0] + VIRTUAL_EDGE_MARGIN_MM, b[1] - VIRTUAL_EDGE_MARGIN_MM);
-    t.pos.y = constrain(t.pos.y, b[2] + VIRTUAL_EDGE_MARGIN_MM, b[3] - VIRTUAL_EDGE_MARGIN_MM);
+    // no field clamp: players may walk out of the anchor field (like real
+    // players), which triggers the engine's out-of-bounds warning.
   }
   t.speedMs = speed;
   t.trail.add(t.pos.copy());
