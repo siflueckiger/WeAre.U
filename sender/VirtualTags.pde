@@ -15,6 +15,7 @@ int     VIRTUAL_EDGE_MARGIN_MM = 200;    // keep players inside the field
 
 boolean virtualOn = false;
 boolean virtualAutoEngaged = false;
+boolean oobSim = false;       // debug: hold P1 outside the field (O key) to test the warning
 long virtualLastMs = 0;
 HashSet<Character> vKeys = new HashSet<Character>();
 HashSet<Integer> vCodes = new HashSet<Integer>();
@@ -70,8 +71,28 @@ void updateVirtualTags() {
   if (dt > 0.25f) dt = 0.25f;
 
   lastFrameMs = now;   // keep HUD "no data" warning + tag fade quiet
-  moveVirtual(TAG0_ID, 'w', 's', 'a', 'd', dt);
-  moveVirtual(TAG1_ID, UP, DOWN, LEFT, RIGHT, dt);
+  if (oobSim) {
+    forceOob(TAG0_ID);
+    moveVirtual(TAG1_ID, UP, DOWN, LEFT, RIGHT, dt);
+  } else {
+    moveVirtual(TAG0_ID, 'w', 's', 'a', 'd', dt);
+    moveVirtual(TAG1_ID, UP, DOWN, LEFT, RIGHT, dt);
+  }
+}
+
+// Debug: park P1 just outside the field so the out-of-bounds warning + countdown
+// can be tested without hardware. Bypasses the field clamp.
+void forceOob(int id) {
+  TagData t = tags.get(id);
+  if (t == null || t.pos == null) return;
+  float[] b = fieldBounds();
+  t.pos.x = b[0] - OOB_MARGIN_MM - 600;
+  t.pos.y = (b[2] + b[3]) / 2;
+  t.speedMs = 0;
+  t.trail.add(t.pos.copy());
+  if (t.trail.size() > TRAIL_MAX) t.trail.remove(0);
+  t.lastFixMs = millis();
+  sendPos(id, t.pos.x, t.pos.y);
 }
 
 void moveVirtual(int id, int upK, int downK, int leftK, int rightK, float dt) {

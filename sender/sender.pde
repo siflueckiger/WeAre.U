@@ -46,6 +46,11 @@ float READY_S               = 3;      // countdown length
 float GAMEOVER_S            = 10;     // winner screen length
 float START_ZONE_RADIUS_MM  = 250;    // radius a player must be within
 
+// Out-of-bounds: real players can leave the anchor field. Engine tracks how long
+// a player is outside and warns, then ends the round (see Core_GameMode.pde).
+float OOB_MARGIN_MM   = 400;          // tolerance beyond the field border
+float OOB_TIMEOUT_S   = 5;            // seconds outside before the round ends
+
 // Start positions per player -- standard: middle of the field, 1 m apart.
 // Override in setup mode (Z/X capture or mouse drag) / config.json.
 float[] P1_START = { 3000, 1500 };
@@ -94,6 +99,9 @@ long stateEnteredMs = 0;
 long lastTickMs = 0;
 long lastGameOscMs = 0;
 long appStartMs = 0;
+float[] oobCountdown = { OOB_TIMEOUT_S, OOB_TIMEOUT_S };
+boolean[] oobActive = { false, false };
+int roundWinner = -1;   // -1 = derive from scores, 1/2 = forced winner
 
 int appMode = MODE_GAME;
 
@@ -133,7 +141,10 @@ void draw() {
   }
   drawTag(TAG0_ID, C_T0, "P1");
   drawTag(TAG1_ID, C_T1, "P2");
-  if (appMode == MODE_GAME) drawHud();
+  if (appMode == MODE_GAME) {
+    drawOobMarkers();
+    drawHud();
+  }
   else setupDraw();   // defined in Setup.pde
 }
 
@@ -235,6 +246,14 @@ void keyPressed() {
     return;
   }
   if (virtualEnabled() && vKeyDown()) return;   // movement key consumed
+
+  if (key == 'o' || key == 'O') {
+    if (virtualEnabled()) {
+      oobSim = !oobSim;
+      println("OOB simulation (P1): " + onOff(oobSim));
+    }
+    return;
+  }
 
   if (key == '1') {
     USE_SPEED_CLAMP = !USE_SPEED_CLAMP;
@@ -434,6 +453,26 @@ void drawZone(float[] p, String label, color c) {
   text(label, q.x, q.y);
 }
 
+void drawOobMarkers() {
+  drawOobMarker(TAG0_ID, 0);
+  drawOobMarker(TAG1_ID, 1);
+}
+
+void drawOobMarker(int id, int idx) {
+  if (!oobActive[idx]) return;
+  TagData t = tags.get(id);
+  if (t == null || t.pos == null) return;
+  PVector p = scr(t.pos.x, t.pos.y);
+  noFill();
+  stroke(255, 60, 60);
+  strokeWeight(4);
+  float r = max(20, 40 * s);
+  ellipse(p.x, p.y, 2 * r, 2 * r);
+  fill(255, 80, 80);
+  textAlign(CENTER, BOTTOM);
+  text("GO BACK! " + (int)ceil(oobCountdown[idx]) + "s", p.x, p.y - r - 4);
+}
+
 void drawTag(int id, color c, String label) {
   TagData t = tags.get(id);
   float alphaBase = 255;
@@ -479,7 +518,7 @@ void drawHud() {
   y += 18;
   if (virtualOn) {
     fill(120, 200, 255);
-    text("Virtual-Spieler AN: WASD = P1, Pfeiltasten = P2  (V = aus)", 10, y);
+    text("Virtual-Spieler AN: WASD = P1, Pfeiltasten = P2  (V = aus  |  O = OOB-Simulation P1)", 10, y);
     fill(255);
     y += 18;
   } else if (port == null) {
@@ -504,6 +543,19 @@ void drawHud() {
   if (millis() - lastFrameMs > 2000 && port != null) {
     fill(255, 120, 120);
     text("No data for >2s", 10, y);
+    fill(255);
+    y += 18;
+  }
+
+  if (oobActive[0]) {
+    fill(255, 90, 90);
+    text("P1: GO BACK NOW OR LOSE A LIFE (" + (int)ceil(oobCountdown[0]) + "s)", 10, y);
+    fill(255);
+    y += 18;
+  }
+  if (oobActive[1]) {
+    fill(255, 90, 90);
+    text("P2: GO BACK NOW OR LOSE A LIFE (" + (int)ceil(oobCountdown[1]) + "s)", 10, y);
     fill(255);
     y += 18;
   }

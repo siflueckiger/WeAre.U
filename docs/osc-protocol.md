@@ -11,7 +11,8 @@
 | `/p1/pos` | x, y (mm) | pro Frame | Position Spieler 1 (Tag `0x0000`) |
 | `/p2/pos` | x, y (mm) | pro Frame | Position Spieler 2 (Tag `0x0001`) |
 | `/coin/pos` | x, y (mm) | 100 ms + sofort bei State-Wechsel | Münz-Position |
-| `/game/stats` | state, time_left, p1_score, p2_score | 100 ms + sofort bei State-Wechsel | Game-Status |
+| `/game/stats` | state, time_left, p1_score, p2_score, winner | 100 ms + sofort bei State-Wechsel | Game-Status; `winner` = -1 (aus Scores ableiten), 1 oder 2 (erzwungen) |
+| `/game/oob` | player (0=P1, 1=P2), seconds_left, active (0/1) | 100 ms | Out-of-bounds-Warnung + Countdown |
 | `/start/p1` | x, y (mm) | bei Config-Änderung/Start/Mode-Wechsel | Startzone P1 |
 | `/start/p2` | x, y (mm) | bei Config-Änderung/Start/Mode-Wechsel | Startzone P2 |
 | `/anchors` | AX0–AX3, AY0–AY3 (8 floats) | bei Start/Mode-Wechsel/Layout-Änderung | Anchor-Geometrie |
@@ -29,9 +30,16 @@
 
 - **Konstanten müssen in Sender und Receiver übereinstimmen:** GameStates, `START_ZONE_RADIUS_MM`, Startzonen-Defaults (`MUST MATCH`).
 - WAIT → beide Spieler in Startzone → READY (3 s Countdown); verlässt einer die Zone → zurück zu WAIT.
-- PLAYING: Timer läuft ab (`GAME_TIME_S`, aktuell 30), Coin einsammeln bei < `COLLECT_RADIUS_MM` (500) → Score++ + Respawn.
+- PLAYING: Timer läuft ab (`GAME_TIME_S`, aktuell 30), Coin einsammeln bei < `COLLECT_RADIUS_MM` (300) → Score++ + Respawn.
 - Coin-Spawn: 500 mm Feldrand, min. 800 mm Abstand zu Spielern, Fairness `|d1-d2| <= 1200 mm`.
 - GAMEOVER: 10 s Anzeige → automatisch zurück zu WAIT.
+
+## Out-of-Bounds (`/game/oob`)
+
+- Engine-seitig, gilt in allen Modes: Spieler ausserhalb `fieldBounds()` + `OOB_MARGIN_MM` (400) → Countdown ab `OOB_TIMEOUT_S` (5 s) läuft, bei Rückkehr Reset.
+- Countdown = 0 → Runde endet, der andere Spieler gewinnt (Hook `GameMode.onPlayerOut`, von Mode 1 später für Lebens-Verlust überschrieben).
+- Warnung erscheint auf Sender und Receiver: `GO BACK NOW OR LOSE A LIFE` + Sekunden.
+- Kein Positions-Fix → kein Countdown (Tracking-Verlust wird nie bestraft).
 
 ## Setup-Modus (Sender, TAB-Taste)
 

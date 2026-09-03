@@ -53,6 +53,8 @@ time_left = 0
 p1_score = 0
 p2_score = 0
 coin_pos = None
+oob = {0: None, 1: None}   # player_index -> (seconds_left, active) or None
+winner = -1                # -1 = derive from scores, 1/2 = forced winner
 clock = pygame.time.Clock()
 font = None
 font_small = None
@@ -111,7 +113,7 @@ def anchors_handler(address, *args):
 
 
 def stats_handler(address, *args):
-    global game_state, time_left, p1_score, p2_score, packets, last_packet_ms
+    global game_state, time_left, p1_score, p2_score, winner, packets, last_packet_ms
     if len(args) < 4:
         return
     packets += 1
@@ -120,6 +122,16 @@ def stats_handler(address, *args):
     time_left = int(args[1])
     p1_score = int(args[2])
     p2_score = int(args[3])
+    winner = int(args[4]) if len(args) >= 5 else -1
+
+
+def oob_handler(address, *args):
+    if len(args) < 3:
+        return
+    player = int(args[0])
+    seconds = int(args[1])
+    active = int(args[2])
+    oob[player] = (seconds, active)
 
 
 def start_osc():
@@ -128,6 +140,7 @@ def start_osc():
     dispatcher.map("/p2/pos", make_pos_handler(0x0001))
     dispatcher.map("/coin/pos", coin_handler)
     dispatcher.map("/game/stats", stats_handler)
+    dispatcher.map("/game/oob", oob_handler)
     dispatcher.map("/start/p1", make_start_handler(P1_START))
     dispatcher.map("/start/p2", make_start_handler(P2_START))
     dispatcher.map("/anchors", anchors_handler)
@@ -285,13 +298,34 @@ def draw_game_overlay(surface):
         draw_center_text(surface, str(max(1, time_left)), font_big, (255, 255, 255))
     elif game_state == STATE_GAMEOVER:
         draw_center_text(surface, "GAME OVER", font_big, (255, 255, 255), -40)
-        if p1_score > p2_score:
+        w = winner
+        if w == -1:
+            w = 1 if p1_score > p2_score else (2 if p2_score > p1_score else 0)
+        if w == 1:
             draw_center_text(surface, "SPIELER 1 GEWINNT!", font_mid, C_P1, 10)
-        elif p2_score > p1_score:
+        elif w == 2:
             draw_center_text(surface, "SPIELER 2 GEWINNT!", font_mid, C_P2, 10)
         else:
             draw_center_text(surface, "UNENTSCHIEDEN!", font_mid, (200, 200, 200), 10)
         draw_center_text(surface, f"P1: {p1_score}   P2: {p2_score}", font, (255, 255, 255), 50)
+
+
+def draw_oob_warning(surface):
+    warnings = []
+    for player, color, label in ((0, C_P1, "P1"), (1, C_P2, "P2")):
+        v = oob.get(player)
+        if v and v[1]:
+            warnings.append((color, label, v[0]))
+    if not warnings:
+        return
+    base = surface.get_height() // 2 - 40
+    for i, (color, label, seconds) in enumerate(warnings):
+        text = f"{label}: GO BACK NOW OR LOSE A LIFE  ({seconds})"
+        surf = font_mid.render(text, True, color)
+        rect = surf.get_rect(center=(surface.get_width() // 2, base + i * 44))
+        bar = pygame.Rect(0, rect.y - 6, surface.get_width(), rect.height + 12)
+        pygame.draw.rect(surface, (120, 0, 0), bar)
+        surface.blit(surf, rect)
 
 
 def render_eye(surface, s, ox, oy, draw_debug_hud):
@@ -310,6 +344,7 @@ def render_eye(surface, s, ox, oy, draw_debug_hud):
         draw_coin(surface, s, ox, oy)
         draw_game_hud(surface)
     draw_game_overlay(surface)
+    draw_oob_warning(surface)
     if draw_debug_hud:
         draw_hud(surface, s)
 

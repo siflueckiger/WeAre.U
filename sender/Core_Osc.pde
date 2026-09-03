@@ -22,7 +22,15 @@ void sendGameOsc() {
   stats.add(tl);
   stats.add(sc[0]);
   stats.add(sc[1]);
+  stats.add(roundWinner);   // -1 = derive winner from scores (receiver-side)
   osc.send(stats, piAddr);
+  for (int i = 0; i < 2; i++) {
+    OscMessage o = new OscMessage("/game/oob");
+    o.add(i);                                // player index: 0 = P1, 1 = P2
+    o.add((int)ceil(oobCountdown[i]));       // seconds left
+    o.add(oobActive[i] ? 1 : 0);             // 1 = warning active
+    osc.send(o, piAddr);
+  }
   currentMode.sendOscEntities();
 }
 
