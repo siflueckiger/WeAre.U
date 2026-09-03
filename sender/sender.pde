@@ -117,6 +117,7 @@ void setup() {
   }
   loadConfig();
   currentMode.onModeEnter();
+  sendModeOsc();
   sendStartZones();
   sendAnchors();
   trySerial();
@@ -268,6 +269,7 @@ void setAppMode(int m) {
   appMode = m;
   if (m == MODE_GAME) {
     setState(STATE_WAIT);   // clean restart after setup
+    sendModeOsc();
     sendStartZones();
     sendAnchors();
   }

@@ -28,9 +28,6 @@ P1_START = [1200, 2400]
 P2_START = [5400, 700]
 START_ZONE_RADIUS_MM = 250
 
-C_COIN = (255, 220, 40)
-COIN_PX = 10
-
 FULLSCREEN = True       # False -> fixed window (debug on desktop)
 WINDOW_W = 800          # VR headset screen size (split into left/right eye)
 WINDOW_H = 480
@@ -52,14 +49,28 @@ game_state = STATE_WAIT
 time_left = 0
 p1_score = 0
 p2_score = 0
-coin_pos = None
+entities = {}             # entity_id -> {"type","x","y","radius","color"}
 oob = {0: None, 1: None}   # player_index -> (seconds_left, active) or None
 winner = -1                # -1 = derive from scores, 1/2 = forced winner
+mode_name = ""
+hud_lines = []
+result_title = None
+result_subtitle = None
 clock = pygame.time.Clock()
 font = None
 font_small = None
 font_mid = None
 font_big = None
+
+# Entity type -> shape. Add a new shape here when the sender introduces a new
+# entity type; the color always comes from the sender (/ent/upsert).
+ENTITY_SHAPES = {
+    "coin": "circle",
+    "enemy": "square",
+    "powerup": "ring",
+    "zone": "ring",
+    "obstacle": "rect",
+}
 
 
 class TagData:
@@ -88,13 +99,6 @@ def make_pos_handler(tag_id):
     return handler
 
 
-def coin_handler(address, *args):
-    global coin_pos
-    if len(args) < 2:
-        return
-    coin_pos = (float(args[0]), float(args[1]))
-
-
 def make_start_handler(zone):
     def handler(address, *args):
         if len(args) < 2:
@@ -102,6 +106,55 @@ def make_start_handler(zone):
         zone[0] = float(args[0])
         zone[1] = float(args[1])
     return handler
+
+
+def entity_upsert_handler(address, *args):
+    if len(args) < 8:
+        return
+    eid = int(args[0])
+    typ = str(args[1])
+    x = float(args[2])
+    y = float(args[3])
+    radius = float(args[4])
+    color = (int(args[5]), int(args[6]), int(args[7]))
+    entities[eid] = {"type": typ, "x": x, "y": y, "radius": radius, "color": color}
+
+
+def entity_pos_handler(address, *args):
+    if len(args) < 3:
+        return
+    eid = int(args[0])
+    e = entities.get(eid)
+    if e is None:
+        return
+    e["x"] = float(args[1])
+    e["y"] = float(args[2])
+
+
+def entity_remove_handler(address, *args):
+    if len(args) < 1:
+        return
+    entities.pop(int(args[0]), None)
+
+
+def mode_handler(address, *args):
+    global mode_name
+    if len(args) < 2:
+        return
+    mode_name = str(args[1])
+
+
+def hud_handler(address, *args):
+    global hud_lines
+    hud_lines = [str(a) for a in args]
+
+
+def result_handler(address, *args):
+    global result_title, result_subtitle
+    if len(args) < 2:
+        return
+    result_title = str(args[0])
+    result_subtitle = str(args[1])
 
 
 def anchors_handler(address, *args):
@@ -138,9 +191,14 @@ def start_osc():
     dispatcher = Dispatcher()
     dispatcher.map("/p1/pos", make_pos_handler(0x0000))
     dispatcher.map("/p2/pos", make_pos_handler(0x0001))
-    dispatcher.map("/coin/pos", coin_handler)
+    dispatcher.map("/ent/upsert", entity_upsert_handler)
+    dispatcher.map("/ent/pos", entity_pos_handler)
+    dispatcher.map("/ent/remove", entity_remove_handler)
     dispatcher.map("/game/stats", stats_handler)
     dispatcher.map("/game/oob", oob_handler)
+    dispatcher.map("/game/mode", mode_handler)
+    dispatcher.map("/game/result", result_handler)
+    dispatcher.map("/hud", hud_handler)
     dispatcher.map("/start/p1", make_start_handler(P1_START))
     dispatcher.map("/start/p2", make_start_handler(P2_START))
     dispatcher.map("/anchors", anchors_handler)
@@ -242,7 +300,7 @@ def draw_hud(surface, s):
         y += 20
     surface.blit(
         font.render(
-            f"state={game_state} time={time_left} p1={p1_score} p2={p2_score} coin={coin_pos}",
+            f"state={game_state} time={time_left} p1={p1_score} p2={p2_score} ents={len(entities)} mode={mode_name}",
             True, (200, 200, 200),
         ),
         (10, y),
@@ -273,12 +331,21 @@ def draw_start_zones(surface, s, ox, oy):
         surface.blit(label_surf, label_surf.get_rect(center=c))
 
 
-def draw_coin(surface, s, ox, oy):
-    if coin_pos is None:
-        return
-    c = scr(coin_pos[0], coin_pos[1], s, ox, oy)
-    pygame.draw.circle(surface, C_COIN, c, COIN_PX)
-    pygame.draw.circle(surface, (255, 255, 255), c, COIN_PX, 2)
+def draw_entities(surface, s, ox, oy):
+    for e in entities.values():
+        x, y = scr(e["x"], e["y"], s, ox, oy)
+        r = max(2, int(e["radius"] * s))
+        color = e["color"]
+        typ = ENTITY_SHAPES.get(e["type"], "circle")
+        if typ == "square":
+            pygame.draw.rect(surface, color, (x - r, y - r, 2 * r, 2 * r))
+        elif typ == "ring":
+            pygame.draw.circle(surface, color, (x, y), r, 3)
+        elif typ == "rect":
+            pygame.draw.rect(surface, color, (x - r, y - r, 2 * r, 2 * r))
+        else:  # circle
+            pygame.draw.circle(surface, color, (x, y), r)
+            pygame.draw.circle(surface, (255, 255, 255), (x, y), r, 2)
 
 
 def draw_game_hud(surface):
@@ -289,6 +356,14 @@ def draw_game_hud(surface):
     surface.blit(s1, s1.get_rect(topleft=(12, 8)))
     s2 = font_mid.render(str(p2_score), True, C_P2)
     surface.blit(s2, s2.get_rect(topright=(w - 12, 8)))
+    if mode_name:
+        m = font_small.render(mode_name, True, (180, 180, 180))
+        surface.blit(m, m.get_rect(midtop=(w // 2, 44)))
+    y = 70
+    for line in hud_lines:
+        surf = font_small.render(line, True, (220, 220, 220))
+        surface.blit(surf, surf.get_rect(midtop=(w // 2, y)))
+        y += 20
 
 
 def draw_game_overlay(surface):
@@ -297,16 +372,17 @@ def draw_game_overlay(surface):
     elif game_state == STATE_READY:
         draw_center_text(surface, str(max(1, time_left)), font_big, (255, 255, 255))
     elif game_state == STATE_GAMEOVER:
-        draw_center_text(surface, "GAME OVER", font_big, (255, 255, 255), -40)
+        title = result_title or "GAME OVER"
+        draw_center_text(surface, title, font_big, (255, 255, 255), -40)
+        subtitle = result_subtitle
+        if subtitle is None:
+            w = winner
+            if w == -1:
+                w = 1 if p1_score > p2_score else (2 if p2_score > p1_score else 0)
+            subtitle = "SPIELER 1 GEWINNT!" if w == 1 else ("SPIELER 2 GEWINNT!" if w == 2 else "UNENTSCHIEDEN!")
         w = winner
-        if w == -1:
-            w = 1 if p1_score > p2_score else (2 if p2_score > p1_score else 0)
-        if w == 1:
-            draw_center_text(surface, "SPIELER 1 GEWINNT!", font_mid, C_P1, 10)
-        elif w == 2:
-            draw_center_text(surface, "SPIELER 2 GEWINNT!", font_mid, C_P2, 10)
-        else:
-            draw_center_text(surface, "UNENTSCHIEDEN!", font_mid, (200, 200, 200), 10)
+        sub_color = C_P1 if w == 1 else (C_P2 if w == 2 else (200, 200, 200))
+        draw_center_text(surface, subtitle, font_mid, sub_color, 10)
         draw_center_text(surface, f"P1: {p1_score}   P2: {p2_score}", font, (255, 255, 255), 50)
 
 
@@ -341,7 +417,7 @@ def render_eye(surface, s, ox, oy, draw_debug_hud):
     if game_state in (STATE_WAIT, STATE_READY):
         draw_start_zones(surface, s, ox, oy)
     if game_state == STATE_PLAYING:
-        draw_coin(surface, s, ox, oy)
+        draw_entities(surface, s, ox, oy)
         draw_game_hud(surface)
     draw_game_overlay(surface)
     draw_oob_warning(surface)

@@ -8,12 +8,12 @@ class ModeCoinHunt extends GameMode {
   float COIN_MARGIN_MM          = 500;   // coin spawn: distance to field border
   float COIN_MIN_DIST_PLAYER_MM = 800;   // coin must not spawn on top of a player
   float COIN_FAIR_DIFF_MM       = 1200;  // fairness: |distP1 - distP2| <= this
+  float COIN_VISUAL_MM          = 200;   // coin size in mm (visual, sent to receiver)
 
   color C_COIN = color(255, 220, 40);
-  int COIN_SIZE_PX = 14;
 
   int scoreP1 = 0, scoreP2 = 0;
-  float[] coinPos = null;
+  Entity coin = null;
 
   ModeCoinHunt() {
     super("coinHunt", "Coin Hunt");
@@ -22,31 +22,24 @@ class ModeCoinHunt extends GameMode {
   void onRoundStart() {
     scoreP1 = 0;
     scoreP2 = 0;
+    clearEntities();
+    coin = null;
     spawnCoin();
   }
 
   void update(float dt) {
-    if (coinPos == null) return;
+    if (coin == null) return;
     TagData t0 = tags.get(TAG0_ID);
     TagData t1 = tags.get(TAG1_ID);
-    if (t0 != null && t0.pos != null && dist(t0.pos.x, t0.pos.y, coinPos[0], coinPos[1]) < COLLECT_RADIUS_MM) {
+    if (t0 != null && t0.pos != null && dist(t0.pos.x, t0.pos.y, coin.x, coin.y) < COLLECT_RADIUS_MM) {
       collectCoin(1);
-    } else if (t1 != null && t1.pos != null && dist(t1.pos.x, t1.pos.y, coinPos[0], coinPos[1]) < COLLECT_RADIUS_MM) {
+    } else if (t1 != null && t1.pos != null && dist(t1.pos.x, t1.pos.y, coin.x, coin.y) < COLLECT_RADIUS_MM) {
       collectCoin(2);
     }
   }
 
   int[] scores() {
     return new int[] { scoreP1, scoreP2 };
-  }
-
-  void sendOscEntities() {
-    if (gameState == STATE_PLAYING && coinPos != null) {
-      OscMessage c = new OscMessage("/coin/pos");
-      c.add(coinPos[0]);
-      c.add(coinPos[1]);
-      osc.send(c, piAddr);
-    }
   }
 
   void drawWorld() {
@@ -56,12 +49,13 @@ class ModeCoinHunt extends GameMode {
     drawHitboxRing(TAG0_ID, C_T0);
     drawHitboxRing(TAG1_ID, C_T1);
 
-    if (coinPos == null) return;
-    PVector p = scr(coinPos[0], coinPos[1]);
-    fill(C_COIN);
+    if (coin == null) return;
+    PVector p = scr(coin.x, coin.y);
+    float r = max(6, coin.radius * s);
+    fill(coin.c);
     stroke(255);
     strokeWeight(2);
-    ellipse(p.x, p.y, COIN_SIZE_PX, COIN_SIZE_PX);
+    ellipse(p.x, p.y, 2 * r, 2 * r);
     fill(0);
     textAlign(CENTER, CENTER);
     text("$", p.x, p.y + 1);
@@ -82,6 +76,8 @@ class ModeCoinHunt extends GameMode {
     if (player == 1) scoreP1++;
     else scoreP2++;
     println("P" + player + " collected coin -> P1:" + scoreP1 + " P2:" + scoreP2);
+    if (coin != null) removeEntity(coin.id);
+    coin = null;
     spawnCoin();
   }
 
@@ -99,11 +95,11 @@ class ModeCoinHunt extends GameMode {
       if (min(d0, d1) < COIN_MIN_DIST_PLAYER_MM) continue;              // too close to a player
       if (t0 != null && t1 != null && t0.pos != null && t1.pos != null
           && abs(d0 - d1) > COIN_FAIR_DIFF_MM) continue;                 // unfair for one player
-      coinPos = new float[] { x, y };
+      coin = spawnEntity("coin", x, y, COIN_VISUAL_MM, C_COIN);
       return;
     }
     // fallback (e.g. no player fix yet): random inside margin box
-    coinPos = new float[] { random(b[0] + COIN_MARGIN_MM, b[1] - COIN_MARGIN_MM),
-                            random(b[2] + COIN_MARGIN_MM, b[3] - COIN_MARGIN_MM) };
+    coin = spawnEntity("coin", random(b[0] + COIN_MARGIN_MM, b[1] - COIN_MARGIN_MM),
+                       random(b[2] + COIN_MARGIN_MM, b[3] - COIN_MARGIN_MM), COIN_VISUAL_MM, C_COIN);
   }
 }

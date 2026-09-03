@@ -18,8 +18,14 @@ abstract class GameMode {
   abstract void update(float dt);       // per-frame during PLAYING, dt in seconds
   abstract int[] scores();              // { p1, p2 } for /game/stats + HUD
   abstract void drawWorld();            // sender debug rendering (top view)
-  abstract void sendOscEntities();      // mode-specific OSC entity sync
   void keyPressed(char k) {}            // mode-specific keys (default: none)
+
+  // Per-mode HUD text shown on the receiver (sent as /hud). Empty by default.
+  String[] hudLines() { return new String[0]; }
+
+  // GAMEOVER text for the receiver (sent as /game/result).
+  // Returns { title, subtitle } or null for the engine default (winner text).
+  String[] resultText() { return null; }
 
   // Engine calls this when a player stayed out of bounds for OOB_TIMEOUT_S.
   // Default: end the round, other player wins. Modes with lives (e.g. Mode 1)
