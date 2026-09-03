@@ -4,7 +4,7 @@
 
 class ModeCoinHunt extends GameMode {
 
-  float COLLECT_RADIUS_MM       = 500;   // distance to pick up the coin
+  float COLLECT_RADIUS_MM       = 300;   // distance to pick up the coin (touch-feel)
   float COIN_MARGIN_MM          = 500;   // coin spawn: distance to field border
   float COIN_MIN_DIST_PLAYER_MM = 800;   // coin must not spawn on top of a player
   float COIN_FAIR_DIFF_MM       = 1200;  // fairness: |distP1 - distP2| <= this
@@ -50,7 +50,13 @@ class ModeCoinHunt extends GameMode {
   }
 
   void drawWorld() {
-    if (gameState != STATE_PLAYING || coinPos == null) return;
+    if (gameState != STATE_PLAYING) return;
+
+    // hitbox debug ring: shows the actual collect radius around each player
+    drawHitboxRing(TAG0_ID, C_T0);
+    drawHitboxRing(TAG1_ID, C_T1);
+
+    if (coinPos == null) return;
     PVector p = scr(coinPos[0], coinPos[1]);
     fill(C_COIN);
     stroke(255);
@@ -59,6 +65,17 @@ class ModeCoinHunt extends GameMode {
     fill(0);
     textAlign(CENTER, CENTER);
     text("$", p.x, p.y + 1);
+  }
+
+  void drawHitboxRing(int id, color c) {
+    TagData t = tags.get(id);
+    if (t == null || t.pos == null) return;
+    PVector q = scr(t.pos.x, t.pos.y);
+    float r = COLLECT_RADIUS_MM * s;
+    noFill();
+    stroke(c, 90);
+    strokeWeight(1);
+    ellipse(q.x, q.y, 2 * r, 2 * r);
   }
 
   void collectCoin(int player) {

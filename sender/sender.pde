@@ -474,9 +474,12 @@ void drawHud() {
   fill(180, 230, 180);
   text("Filters: Clamp[" + onOff(USE_SPEED_CLAMP) + "]  EMA[" + onOff(USE_EMA) + " a=" + nf(SMOOTH_ALPHA, 0, 2) + "]  |  keys: 1/2 toggle, 4 = alpha, SPACE = start round", 10, y);
   y += 18;
+  fill(180, 200, 220);
+  text("Keys: TAB = Setup  |  V = Virtual-Spieler an/aus  |  SPACE = Runde starten  |  1/2 = Filter  |  4 = Alpha", 10, y);
+  y += 18;
   if (virtualOn) {
     fill(120, 200, 255);
-    text("Virtual play: WASD = P1, arrows = P2, V = off", 10, y);
+    text("Virtual-Spieler AN: WASD = P1, Pfeiltasten = P2  (V = aus)", 10, y);
     fill(255);
     y += 18;
   } else if (port == null) {
