@@ -8,6 +8,7 @@
 - Prototyp Headset bauen
 - Prototyp Game-Logik (Coin-Sammeln, Scores, GameStates)
 - `sender.pde` hat einen Setup-Mode (TAB), um die Distanzen der Anchors zu erfassen und die Startpositionen der Player festzulegen
+- Anfangen mit 3D Druck Stuff
 
 ### Next
 
@@ -16,12 +17,15 @@
 ## 20.08.2026 – Agent-Session (Minimal Gameplay)
 
 ### Goal
+
 Minimales Gameplay für die VR-Installation: Game-Logik liegt komplett im Processing-Sender, der Pygame-Receiver visualisiert nur.
 
 ### Branches
+
 - `agent/bu03-minimal-gameplay` – gemergt nach `main`
 
 ### Files Changed
+
 - `sender/sender.pde` (modified)
   - Game-State-Machine (WAIT/READY/PLAYING/GAMEOVER), Coin-Spawn/-Collect-Logik, Startzonen
   - OSC: `/p1/pos` + `/p2/pos` (pro Frame), `/coin/pos` + `/game/stats` (alle 100 ms, sofort bei State-Wechsel)
@@ -29,18 +33,22 @@ Minimales Gameplay für die VR-Installation: Game-Logik liegt komplett im Proces
   - Handler für die neuen Addresses, State-Rendering, Game-HUD in beiden Augen, Labels T0/T1 → P1/P2
 
 ### Notes
+
 - `P1_START`/`P2_START` müssen in Sender und Receiver übereinstimmen (`MUST MATCH`)
 - Alter Processing-Receiver (`bu03_vr_receiver_processing`) wurde nicht angepasst (protokoll-inkompatibel)
 
 ## 20.08.2026 – Agent-Session (Setup-Modus)
 
 ### Goal
+
 Interaktiver Setup-Modus im Sender: Anchor-Distanzen eingeben → Auto-Layout, Startzonen per Tag-Capture oder Maus-Drag, Persistenz in `data/config.json`, Sync per OSC an den Receiver.
 
 ### Branches
+
 - `agent/bu03-setup-mode` – gemergt nach `main`
 
 ### Files Changed
+
 - `sender/sender.pde` (modified)
   - `MODE_GAME`/`MODE_SETUP` + TAB-Umschaltung, `loadConfig()`/`saveConfig()`
   - Neue OSC-Adressen: `/start/p1`, `/start/p2`, `/anchors` (Sync an Receiver)
@@ -48,23 +56,28 @@ Interaktiver Setup-Modus im Sender: Anchor-Distanzen eingeben → Auto-Layout, S
   - Distanz-Panel (6 Anchor-Distanzen), Auto-Layout per Kreisschnitt, Maus-Drag für Anchors/Zonen
 
 ### Notes
+
 - Bedienung: Pfeiltasten/Ziffern für Distanzen, `L` Auto-Layout, `Z`/`X` Startzonen-Capture, `V` speichern, `R` Standard-Layout 3x7m
 - `data/config.json` überschreibt die Defaults; Test im Processing-Editor nötig
 
 ## 20.08.2026 – Agent-Session (Repo-Cleanup & Restrukturierung)
 
 ### Goal
+
 Repo bereinigen und sauber strukturieren: veraltete Prototypen und Build-Artefakte löschen, Code-Ordner rollenbasiert benennen, OSC-Protokoll zentral dokumentieren.
 
 ### Branches
+
 - `agent/repo-cleanup` – Deletions + Renames, gemergt nach `main` und gepusht
 
 ### Files Changed
+
 - Gelöscht: `rasperry pi/` (alter April-Prototyp), `bu03_vr_receiver_processing/`, alte BU03-ESP32-Sketches + `.autosave`-Dateien, `WeAre3.0*.canvas`, Tutorial-HTML, kompilierte JARs (~9.6 MB)
 - Umbenannt: `bu03_visualize_and_send/` → `sender/`, `bu03_vr_receiver_pygame/` → `receiver/`, BU03-Doku → `docs/hardware/`
 - `docs/osc-protocol.md` (new), `README.md` (modified)
 
 ### Notes
+
 - Neue Struktur: `sender/` + `receiver/` + `docs/` (hardware, osc-protocol.md, agent-sessions)
 - Processing-Konvention: Ordnername = Haupt-`.pde`-Name
 

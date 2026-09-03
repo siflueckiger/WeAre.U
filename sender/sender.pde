@@ -30,7 +30,7 @@ float SMOOTH_ALPHA   = 0.30;     // 0 = frozen, 1 = unfiltered
 
 // OSC out (Raspberry Pi VR headset receiver)
 boolean OSC_ENABLED = true;
-String  OSC_TARGET_IP   = "192.168.1.104";  // FILL IN: Pi IP
+String  OSC_TARGET_IP   = "192.168.1.106";  // FILL IN: Pi IP
 int     OSC_TARGET_PORT = 8000;
 int     OSC_LOCAL_PORT  = 12000;            // unused listen port (required by oscP5)
 
