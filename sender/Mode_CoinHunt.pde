@@ -73,6 +73,21 @@ class ModeCoinHunt extends GameMode {
     }
   }
 
+  // Out of bounds costs one life (not the round). The player gets a fresh
+  // warning window; only at 0 lives does the round end.
+  void onPlayerOut(int player) {
+    lives[player]--;
+    invuln[player] = INVULN_S;
+    println("P" + (player + 1) + " out of bounds! lives=" + lives[player]);
+    sendHit(player, INVULN_S);
+    oobCountdown[player] = OOB_TIMEOUT_S;
+    oobActive[player] = false;
+    if (lives[player] <= 0) {
+      roundWinner = (player == 0) ? 2 : 1;
+      requestEnd();
+    }
+  }
+
   void onRoundStart() {
     scoreP1 = 0;
     scoreP2 = 0;

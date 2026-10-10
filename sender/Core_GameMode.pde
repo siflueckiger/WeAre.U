@@ -108,14 +108,16 @@ void setState(int s) {
     }
   } else {
     // Every non-playing state must clean up: no leftover entities, no stuck
-    // out-of-bounds warning, no stale winner, no running timer.
+    // out-of-bounds warning, no running timer.
     clearEntities();
     for (int i = 0; i < 2; i++) {
       oobCountdown[i] = OOB_TIMEOUT_S;
       oobActive[i] = false;
     }
-    roundWinner = -1;
     timeLeft = (s == STATE_READY) ? READY_S : 0;
+    // Reset the winner only when preparing a new round, never on GAMEOVER
+    // (a forced winner such as "ran out of lives" must survive).
+    if (s == STATE_WAIT || s == STATE_READY) roundWinner = -1;
     currentMode.onRoundEnd();
   }
   println("game state -> " + stateName(s));

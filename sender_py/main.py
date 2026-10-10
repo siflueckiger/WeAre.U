@@ -198,8 +198,9 @@ class SenderApp:
 
 def run_gui(app):
     import pygame
+    from sender_py.gui import W as GUI_W, H as GUI_H
     pygame.init()
-    screen = pygame.display.set_mode((1000, 800))
+    screen = pygame.display.set_mode((GUI_W, GUI_H), pygame.RESIZABLE)
     pygame.display.set_caption("sender")
     clock = pygame.time.Clock()
     app.virtual.bind(pygame.K_w, pygame.K_a, pygame.K_s, pygame.K_d,

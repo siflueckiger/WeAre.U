@@ -2,28 +2,32 @@
 
 Layout: unified header (P1 | center | P2), a completely free playing field,
 floating warnings only when active, and a compact status footer.
+
+Rendering uses antialiased primitives (pygame.gfxdraw / aaline) and real vector
+fonts so it looks crisp instead of pixelated.
 """
 
 import math
 import time
 
 import pygame
+import pygame.gfxdraw
 
 from shared.protocol import (
     STATE_WAIT, STATE_READY, STATE_PLAYING, STATE_GAMEOVER,
     START_ZONE_RADIUS_MM, C_P1, C_P2, TAG0_ID, TAG1_ID, TRAIL_MAX,
 )
 
-W, H = 1000, 800
+W, H = 1280, 960
 HEADER_H = 96
 FOOTER_H = 30
 
 MODE_GAME = 0
 MODE_SETUP = 1
 
-F_BG = (12, 12, 18)
-F_PANEL = (12, 12, 18)
-GRID = (45, 45, 45)
+F_BG = (22, 22, 26)
+F_PANEL = (14, 14, 20)
+GRID = (34, 34, 40)
 ANCHOR = (90, 200, 90)
 
 STATE_COLORS = {
@@ -37,10 +41,16 @@ STATE_COLORS = {
 class Gui:
     def __init__(self):
         pygame.font.init()
-        self.font = pygame.font.SysFont(None, 18)
-        self.font_small = pygame.font.SysFont(None, 16)
-        self.font_big = pygame.font.SysFont(None, 46)
-        self.font_mid = pygame.font.SysFont(None, 26)
+        path = (pygame.font.match_font("helvetica")
+                or pygame.font.match_font("arial")
+                or pygame.font.match_font("dejavusans"))
+        self.font = pygame.font.Font(path, 16)
+        self.font_small = pygame.font.Font(path, 14)
+        self.font_mid = pygame.font.Font(path, 24)
+        self.font_mid.set_bold(True)
+        self.font_big = pygame.font.Font(path, 44)
+        self.font_big.set_bold(True)
+        self.w, self.h = W, H
         self.s = 1.0
         self.ox = 0.0
         self.oy = 0.0
@@ -57,10 +67,10 @@ class Gui:
         if h < 1:
             h = 1000
         if app.app_mode == MODE_GAME:
-            top, bottom, side = HEADER_H + 16, H - FOOTER_H - 16, 24
+            top, bottom, side = HEADER_H + 16, self.h - FOOTER_H - 16, 24
         else:
-            top, bottom, side = 80, H - 80, 80
-        avail_w = W - 2 * side
+            top, bottom, side = 80, self.h - 80, 80
+        avail_w = self.w - 2 * side
         avail_h = bottom - top
         self.s = min(avail_w / w, avail_h / h)
         field_top = top + (avail_h - h * self.s) / 2
@@ -70,7 +80,30 @@ class Gui:
     def scr(self, x, y):
         return (self.ox + x * self.s, self.oy - y * self.s)
 
-    # ============================ primitives ============================
+    # ============================ antialiased primitives ============================
+    def disc(self, surface, color, x, y, r):
+        r = max(1, int(round(r)))
+        x, y = int(round(x)), int(round(y))
+        pygame.gfxdraw.filled_circle(surface, x, y, r, color)
+        pygame.gfxdraw.aacircle(surface, x, y, r, color)
+
+    def ring(self, surface, color, x, y, r, width=2):
+        r = max(1, int(round(r)))
+        x, y = int(round(x)), int(round(y))
+        for i in range(max(1, int(width))):
+            rr = r - i
+            if rr < 0:
+                break
+            pygame.gfxdraw.aacircle(surface, x, y, rr, color)
+
+    def line(self, surface, color, a, b, width=1):
+        a = (int(round(a[0])), int(round(a[1])))
+        b = (int(round(b[0])), int(round(b[1])))
+        if width <= 1:
+            pygame.draw.aaline(surface, color, a, b)
+        else:
+            pygame.draw.line(surface, color, a, b, width)
+
     def panel(self, surface, x, y, w, h, title, title_col):
         pygame.draw.rect(surface, F_PANEL, (x, y, w, h))
         pygame.draw.rect(surface, title_col, (x, y, w, 18))
@@ -81,7 +114,8 @@ class Gui:
     def draw(self, surface, app):
         self.surface = surface
         self.app = app
-        surface.fill((22, 22, 22))
+        self.w, self.h = surface.get_size()
+        surface.fill(F_BG)
         self.compute_transform(app)
         self.draw_grid(surface, app)
         self.draw_anchors(surface, app)
@@ -111,15 +145,11 @@ class Gui:
         step = 500
         gx = math.floor(minx / step) * step
         while gx <= maxx:
-            a = self.scr(gx, miny)
-            b = self.scr(gx, maxy)
-            pygame.draw.line(surface, GRID, a, b, 1)
+            self.line(surface, GRID, self.scr(gx, miny), self.scr(gx, maxy))
             gx += step
         gy = math.floor(miny / step) * step
         while gy <= maxy:
-            a = self.scr(minx, gy)
-            b = self.scr(maxx, gy)
-            pygame.draw.line(surface, GRID, a, b, 1)
+            self.line(surface, GRID, self.scr(minx, gy), self.scr(maxx, gy))
             gy += step
 
     def draw_anchors(self, surface, app):
@@ -130,14 +160,13 @@ class Gui:
             surface.blit(t, t.get_rect(midbottom=(p[0], p[1] - 10)))
 
     def draw_start_zones(self, surface, app):
-        from shared.protocol import STATE_WAIT, STATE_READY
         if app.engine.state not in (STATE_WAIT, STATE_READY):
             return
         for zone, label, c in ((app.engine.p1_start, "P1", C_P1),
                                (app.engine.p2_start, "P2", C_P2)):
             q = self.scr(zone[0], zone[1])
-            r = max(1, int(START_ZONE_RADIUS_MM * self.s))
-            pygame.draw.circle(surface, c, (int(q[0]), int(q[1])), r, 2)
+            r = max(1, START_ZONE_RADIUS_MM * self.s)
+            self.ring(surface, c, q[0], q[1], r, 2)
             s = self.font_small.render(label, True, c)
             surface.blit(s, s.get_rect(center=(int(q[0]), int(q[1]))))
 
@@ -153,12 +182,12 @@ class Gui:
                 f = 15 + (i - 1) * (200 - 15) / max(1, n - 2)
                 a = f if not stale else f * 90 / 255
                 col = tuple(int(c * a / 220) for c in color)
-                pygame.draw.line(surface, col, pts[i - 1], pts[i], 2)
+                self.line(surface, col, pts[i - 1], pts[i])
         if t.pos is not None:
             p = self.scr(t.pos[0], t.pos[1])
             col = color if not stale else tuple(int(c * 90 / 255) for c in color)
-            pygame.draw.circle(surface, col, (int(p[0]), int(p[1])), 7)
-            pygame.draw.circle(surface, (255, 255, 255), (int(p[0]), int(p[1])), 7, 2)
+            self.disc(surface, col, p[0], p[1], 7)
+            self.ring(surface, (255, 255, 255), p[0], p[1], 7, 1)
             s = self.font_small.render(label, True, (255, 255, 255))
             surface.blit(s, (p[0] + 10, p[1] - 8))
 
@@ -167,15 +196,15 @@ class Gui:
             if not e.visible:
                 continue
             x, y = self.scr(e.x, e.y)
-            r = max(2, int(e.radius * self.s))
+            r = max(2, e.radius * self.s)
             typ = e.type
-            if typ == "enemy" or typ == "obstacle":
+            if typ in ("enemy", "obstacle"):
                 pygame.draw.rect(surface, e.color, (x - r, y - r, 2 * r, 2 * r))
-            elif typ == "powerup" or typ == "zone":
-                pygame.draw.circle(surface, e.color, (int(x), int(y)), r, 3)
+            elif typ in ("powerup", "zone"):
+                self.ring(surface, e.color, x, y, r, 3)
             else:
-                pygame.draw.circle(surface, e.color, (int(x), int(y)), r)
-                pygame.draw.circle(surface, (255, 255, 255), (int(x), int(y)), r, 2)
+                self.disc(surface, e.color, x, y, r)
+                self.ring(surface, (255, 255, 255), x, y, r, 1)
             if e.label:
                 s = self.font_small.render(e.label, True, (255, 255, 255))
                 surface.blit(s, s.get_rect(center=(int(x), int(y))))
@@ -185,8 +214,7 @@ class Gui:
         if t is None or t.pos is None:
             return
         q = self.scr(t.pos[0], t.pos[1])
-        r = max(1, int(radius_mm * self.s))
-        pygame.draw.circle(self.surface, color, (int(q[0]), int(q[1])), r, 1)
+        self.ring(self.surface, color, q[0], q[1], max(1, radius_mm * self.s), 1)
 
     def draw_oob_markers(self, surface, app):
         for i, tid in ((0, TAG0_ID), (1, TAG1_ID)):
@@ -196,8 +224,8 @@ class Gui:
             if t is None or t.pos is None:
                 continue
             p = self.scr(t.pos[0], t.pos[1])
-            r = max(20, int(40 * self.s))
-            pygame.draw.circle(surface, (255, 60, 60), (int(p[0]), int(p[1])), r, 4)
+            r = max(20, 40 * self.s)
+            self.ring(surface, (255, 60, 60), p[0], p[1], r, 4)
             s = self.font_small.render("GO BACK! %ds" % int(app.engine.oob_countdown[i] + 0.999),
                                        True, (255, 80, 80))
             surface.blit(s, s.get_rect(midbottom=(p[0], p[1] - r - 4)))
@@ -205,23 +233,23 @@ class Gui:
     # ============================ header ============================
     def draw_header(self, surface, app):
         eng = app.engine
-        pygame.draw.rect(surface, F_PANEL, (0, 0, W, HEADER_H))
-        pygame.draw.line(surface, (60, 60, 60), (0, HEADER_H), (W, HEADER_H))
+        pygame.draw.rect(surface, F_PANEL, (0, 0, self.w, HEADER_H))
+        pygame.draw.line(surface, (60, 60, 60), (0, HEADER_H), (self.w, HEADER_H))
         sc = STATE_COLORS.get(eng.state, (255, 255, 255))
 
         mode_t = self.font.render(eng.mode.display_name.upper(), True, (200, 200, 200))
-        surface.blit(mode_t, mode_t.get_rect(midtop=(W // 2, 6)))
+        surface.blit(mode_t, mode_t.get_rect(midtop=(self.w // 2, 6)))
         big = self.font_big.render(self._center_value(app), True, sc)
-        surface.blit(big, big.get_rect(midtop=(W // 2, 22)))
+        surface.blit(big, big.get_rect(midtop=(self.w // 2, 22)))
         st = self.font.render(eng.state_name(), True, sc)
-        surface.blit(st, st.get_rect(midtop=(W // 2, HEADER_H - 32)))
+        surface.blit(st, st.get_rect(midtop=(self.w // 2, HEADER_H - 32)))
         lines = eng.mode.hud_lines()
         if lines:
             lt = self.font_small.render("    ".join(lines), True, (235, 210, 150))
-            surface.blit(lt, lt.get_rect(midtop=(W // 2, HEADER_H - 15)))
+            surface.blit(lt, lt.get_rect(midtop=(self.w // 2, HEADER_H - 15)))
 
         self.draw_header_player(surface, app, 0, 16)
-        self.draw_header_player(surface, app, 1, W - 16)
+        self.draw_header_player(surface, app, 1, self.w - 16)
 
     def _center_value(self, app):
         eng = app.engine
@@ -249,16 +277,16 @@ class Gui:
         lives = eng.mode.player_lives(p)
         pip_y = 66
         if lives >= 0:
-            pip_r, gap = 5, 5
+            pip_r, gap = 6, 6
             n = max(1, lives)
             total = n * 2 * pip_r + (n - 1) * gap
             sx = x if left else x - total
             for i in range(n):
-                cx = int(sx + pip_r + i * (2 * pip_r + gap))
+                cx = sx + pip_r + i * (2 * pip_r + gap)
                 if i < lives:
-                    pygame.draw.circle(surface, c, (cx, pip_y), pip_r)
+                    self.disc(surface, c, cx, pip_y, pip_r)
                 else:
-                    pygame.draw.circle(surface, tuple(int(v * 0.3) for v in c), (cx, pip_y), pip_r, 1)
+                    self.ring(surface, tuple(int(v * 0.35) for v in c), cx, pip_y, pip_r, 1)
 
         if eng.state in (STATE_WAIT, STATE_READY):
             inz = eng.in_zone(eng.tags.get(TAG0_ID if p == 0 else TAG1_ID),
@@ -278,7 +306,7 @@ class Gui:
             warns.append(("SERIAL NOT CONNECTED -- searching port", (255, 50, 50)))
         elif not app.virtual.on and app.tracker.last_frame_ms and now_ms() - app.tracker.last_frame_ms > 2000:
             warns.append(("NO TAG DATA FOR >2s", (255, 50, 50)))
-        for i in (app.tracker.seen_ids):
+        for i in app.tracker.seen_ids:
             if i not in (TAG0_ID, TAG1_ID):
                 warns.append(("UNKNOWN TagID 0x%04X -- check TAG0_ID/TAG1_ID" % i, (255, 160, 40)))
                 break
@@ -291,15 +319,15 @@ class Gui:
         for text, col in warns:
             t = self.font.render(text, True, (255, 255, 255))
             pad = 8
-            x = W // 2 - t.get_width() // 2 - pad
+            x = self.w // 2 - t.get_width() // 2 - pad
             pygame.draw.rect(surface, col, (x, y, t.get_width() + 2 * pad, 22))
             surface.blit(t, (x + pad, y + 2))
             y += 26
 
     def draw_footer(self, surface, app):
-        fy = H - FOOTER_H
-        pygame.draw.rect(surface, F_PANEL, (0, fy, W, FOOTER_H))
-        pygame.draw.line(surface, (60, 60, 60), (0, fy), (W, fy))
+        fy = self.h - FOOTER_H
+        pygame.draw.rect(surface, F_PANEL, (0, fy, self.w, FOOTER_H))
+        pygame.draw.line(surface, (60, 60, 60), (0, fy), (self.w, fy))
         cy = fy + FOOTER_H // 2
 
         if app.virtual.on:
@@ -308,7 +336,7 @@ class Gui:
             dot, serial = (255, 80, 80), "SERIAL --"
         else:
             dot, serial = (120, 230, 120), "SERIAL OK"
-        pygame.draw.circle(surface, dot, (16, cy), 5)
+        self.disc(surface, dot, 16, cy, 5)
         t = self.font_small.render(serial, True, dot)
         surface.blit(t, (26, cy - 8))
 
@@ -321,12 +349,12 @@ class Gui:
 
         hint = "V virtual   R reset   SPACE start   TAB setup   M mode   D debug   H help"
         ht = self.font_small.render(hint, True, (150, 150, 150))
-        surface.blit(ht, ht.get_rect(topright=(W - 14, cy - 8)))
+        surface.blit(ht, ht.get_rect(topright=(self.w - 14, cy - 8)))
 
     def draw_debug_cards(self, surface, app):
-        w, h, y = 300, 92, HEADER_H + 10
+        w, h, y = 320, 92, HEADER_H + 10
         self.draw_debug_card(surface, app, TAG0_ID, "P1", C_P1, 10, y, w, h)
-        self.draw_debug_card(surface, app, TAG1_ID, "P2", C_P2, W - 10 - w, y, w, h)
+        self.draw_debug_card(surface, app, TAG1_ID, "P2", C_P2, self.w - 10 - w, y, w, h)
 
     def draw_debug_card(self, surface, app, tid, label, c, x, y, w, h):
         self.panel(surface, x, y, w, h, label + "  (debug)", c)
@@ -358,11 +386,11 @@ class Gui:
             "H .......... hide this help",
             "WASD / arrows = move virtual P1/P2",
         ]
-        w, h = 300, 24 + len(lines) * 18 + 10
-        x, y = W // 2 - w // 2, H // 2 - h // 2
+        w, h = 320, 24 + len(lines) * 20 + 10
+        x, y = self.w // 2 - w // 2, self.h // 2 - h // 2
         self.panel(surface, x, y, w, h, "KEYS", (180, 200, 220))
         for i, ln in enumerate(lines):
-            surface.blit(self.font.render(ln, True, (255, 255, 255)), (x + 10, y + 26 + i * 18))
+            surface.blit(self.font.render(ln, True, (255, 255, 255)), (x + 10, y + 26 + i * 20))
 
     def draw_invuln_blink(self, tid, seconds):
         if seconds <= 0:
@@ -373,7 +401,7 @@ class Gui:
         if t is None or t.pos is None:
             return
         p = self.scr(t.pos[0], t.pos[1])
-        pygame.draw.circle(self.surface, (255, 255, 255), (int(p[0]), int(p[1])), 17, 3)
+        self.ring(self.surface, (255, 255, 255), p[0], p[1], 18, 3)
 
 
 def _onoff(v):

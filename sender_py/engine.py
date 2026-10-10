@@ -81,8 +81,11 @@ class GameEngine:
             for i in range(2):
                 self.oob_countdown[i] = float(self.OOB_TIMEOUT_S)
                 self.oob_active[i] = False
-            self.round_winner = -1
             self.time_left = self.READY_S if s == STATE_READY else 0.0
+            # reset the winner only when preparing a new round, never on
+            # GAMEOVER (a forced winner such as "ran out of lives" must survive)
+            if s in (STATE_WAIT, STATE_READY):
+                self.round_winner = -1
             self.mode.on_round_end()
         print("game state ->", self.state_name())
 

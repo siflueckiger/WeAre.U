@@ -104,6 +104,20 @@ class CoinHunt(GameMode):
         self.powerup_timer = float(self.POWERUP_INTERVAL_S)
         self.spawn_coin()
 
+    # Out of bounds costs one life (not the round). The player gets a fresh
+    # warning window; only at 0 lives does the round end.
+    def on_player_out(self, player):
+        self.lives[player] -= 1
+        self.invuln[player] = self.INVULN_S
+        print("P%d out of bounds! -1 life, remaining: %d" % (player + 1, self.lives[player]))
+        self.engine.osc.hit(player, self.INVULN_S)
+        self.engine.oob_countdown[player] = float(self.engine.OOB_TIMEOUT_S)
+        self.engine.oob_active[player] = False
+        if self.lives[player] <= 0:
+            self.engine.round_winner = 2 if player == 0 else 1
+            print("P%d ran out of lives (out of bounds) -> round over" % (player + 1))
+            self.engine.request_end()
+
     def update(self, dt):
         self.tick_timers(dt)
         self.update_magnet(dt)

@@ -67,7 +67,7 @@ Neue Typen brauchen nur eine zusätzliche Shape in `receiver.py` → `ENTITY_SHA
 ## Out-of-Bounds (`/game/oob`)
 
 - Engine-seitig, gilt in allen Modes: Spieler ausserhalb `fieldBounds()` + `OOB_MARGIN_MM` (400) → Countdown ab `OOB_TIMEOUT_S` (5 s) läuft, bei Rückkehr Reset.
-- Countdown = 0 → Runde endet, der andere Spieler gewinnt (Hook `GameMode.onPlayerOut`, von Mode 1 später für Lebens-Verlust überschrieben).
+- Countdown = 0 → Hook `GameMode.onPlayerOut`. Mode 1 (Coin Hunt) überschreibt ihn: −1 Leben, 2 s Unverwundbarkeit, Countdown startet neu; erst bei 0 Leben endet die Runde (der andere Spieler gewinnt). Ohne Überschreibung (Basisklasse) endet die Runde sofort.
 - Warnung erscheint auf Sender und Receiver: `GO BACK NOW OR LOSE A LIFE` + Sekunden.
 - Kein Positions-Fix → kein Countdown (Tracking-Verlust wird nie bestraft).
 
