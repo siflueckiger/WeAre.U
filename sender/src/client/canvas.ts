@@ -3,7 +3,13 @@
  * All coordinates are in field mm; the camera maps them to CSS pixels. The
  * canvas backing store is scaled by devicePixelRatio for true retina rendering.
  */
-import { STATE_PLAYING, STATE_READY, STATE_WAIT, type Vec2 } from "../shared/protocol.js";
+import {
+  STATE_GAMEOVER,
+  STATE_PLAYING,
+  STATE_READY,
+  STATE_WAIT,
+  type Vec2,
+} from "../shared/protocol.js";
 import type { EntityView, GameView } from "../shared/types.js";
 
 const BG = "#16161a";
@@ -41,6 +47,23 @@ export class Camera {
     this.h = h;
   }
 
+  /** Uniform margin camera (mirrors receiver.py's update_transform). */
+  computeUniform(ax: number[], ay: number[], w: number, h: number, margin: number): void {
+    const minx = Math.min(...ax);
+    const maxx = Math.max(...ax);
+    const miny = Math.min(...ay);
+    const maxy = Math.max(...ay);
+    let fw = maxx - minx;
+    let fh = maxy - miny;
+    if (fw < 1) fw = 1000;
+    if (fh < 1) fh = 1000;
+    this.s = Math.min((w - 2 * margin) / fw, (h - 2 * margin) / fh);
+    this.ox = (w - fw * this.s) / 2 - minx * this.s;
+    this.oy = (h + fh * this.s) / 2 + miny * this.s;
+    this.w = w;
+    this.h = h;
+  }
+
   sx(x: number): number {
     return this.ox + x * this.s;
   }
@@ -66,7 +89,70 @@ export function renderField(
   ctx.fillRect(0, 0, w, h);
 
   cam.compute(game.anchors.ax, game.anchors.ay, w, h, setupActive);
+  drawWorld(ctx, cam, game, setupActive);
+}
 
+/** Stereo (side-by-side) rendering matching the Pi headset receiver. */
+export const EYE_OFFSET_MM = 150;
+export const STEREO_MARGIN = 30;
+
+export function renderStereo(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  game: GameView,
+  cam: Camera,
+): void {
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, w, h);
+  const eyeW = Math.floor(w / 2);
+
+  // Left eye (parallax to the right), matches receiver.py (ox + off)
+  cam.computeUniform(game.anchors.ax, game.anchors.ay, eyeW, h, STEREO_MARGIN);
+  const off = EYE_OFFSET_MM * cam.s;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, eyeW, h);
+  ctx.clip();
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, eyeW, h);
+  cam.ox += off;
+  drawWorld(ctx, cam, game, false);
+  drawHitFlash(ctx, eyeW, h, game);
+  drawStereoOverlay(ctx, eyeW, h, game, true);
+  ctx.restore();
+
+  // Right eye (parallax to the left), matches receiver.py (ox - off)
+  cam.computeUniform(game.anchors.ax, game.anchors.ay, eyeW, h, STEREO_MARGIN);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(eyeW, 0, eyeW, h);
+  ctx.clip();
+  ctx.translate(eyeW, 0);
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, eyeW, h);
+  cam.ox -= off;
+  drawWorld(ctx, cam, game, false);
+  drawHitFlash(ctx, eyeW, h, game);
+  drawStereoOverlay(ctx, eyeW, h, game, false);
+  ctx.restore();
+
+  // centre divider
+  ctx.strokeStyle = "rgba(90,90,90,0.7)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(eyeW, 0);
+  ctx.lineTo(eyeW, h);
+  ctx.stroke();
+}
+
+function drawWorld(
+  ctx: CanvasRenderingContext2D,
+  cam: Camera,
+  game: GameView,
+  setupActive: boolean,
+): void {
   drawGrid(ctx, cam, game.anchors.ax, game.anchors.ay);
   const showZones = setupActive || game.state === STATE_WAIT || game.state === STATE_READY;
   if (showZones) drawStartZones(ctx, cam, game.startZones, setupActive);
@@ -79,6 +165,68 @@ export function renderField(
   } else {
     // still show player dots while calibrating, to capture zones
     drawPlayers(ctx, cam, game);
+  }
+}
+
+function drawHitFlash(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  game: GameView,
+): void {
+  if (!game.players.some((p) => p.invuln > 0)) return;
+  ctx.fillStyle = "rgba(255,0,0,0.20)";
+  ctx.fillRect(0, 0, w, h);
+}
+
+function drawStereoOverlay(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  game: GameView,
+  debug: boolean,
+): void {
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  // active OOB warnings (large, near the bottom)
+  const warns: string[] = [];
+  for (let i = 0; i < 2; i++) {
+    if (game.oob[i].active) {
+      warns.push(`P${i + 1}: GO BACK NOW OR LOSE A LIFE (${Math.max(0, Math.ceil(game.oob[i].seconds))})`);
+    }
+  }
+  warns.forEach((text, i) => {
+    const y = h - 34 - i * 30;
+    ctx.font = "bold 16px system-ui, sans-serif";
+    const tw = ctx.measureText(text).width;
+    ctx.fillStyle = "rgba(120,0,0,0.85)";
+    ctx.fillRect(w / 2 - tw / 2 - 10, y - 14, tw + 20, 28);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(text, w / 2, y);
+  });
+
+  // game over / result
+  if (game.state === STATE_GAMEOVER) {
+    const title = game.resultTitle ?? "GAME OVER";
+    const sub = game.resultSubtitle ?? "";
+    ctx.font = "bold 30px system-ui, sans-serif";
+    ctx.fillStyle = "#ffaa3c";
+    ctx.fillText(title, w / 2, h / 2 - 18);
+    if (sub) {
+      ctx.font = "bold 18px system-ui, sans-serif";
+      ctx.fillStyle = "#fff";
+      ctx.fillText(sub, w / 2, h / 2 + 16);
+    }
+  }
+
+  if (debug) {
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.fillStyle = "rgba(220,220,220,0.85)";
+    ctx.fillText(`${game.modeName.toUpperCase()}  ${game.stateName}`, 8, 6);
+    ctx.fillText(`P1 ${game.p1Score}   P2 ${game.p2Score}`, 8, 22);
   }
 }
 

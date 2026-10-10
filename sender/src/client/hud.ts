@@ -96,7 +96,7 @@ export function renderFooter(el: HTMLElement, status: StatusView): void {
     `<span>OSC ${escapeHtml(status.oscIp)}:${status.oscPort} · sent ${status.oscSent}</span>`,
     `<span>frames ${status.frames} · ${status.fps} fps</span>`,
     `<span>${filt}</span>`,
-    `<span class="footer-hint">V virtual · R reset · SPACE start · TAB setup · M mode</span>`,
+    `<span class="footer-hint">V virtual · R reset · SPACE start · TAB setup · M mode · H headset</span>`,
   ].join("");
 }
 

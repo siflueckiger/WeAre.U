@@ -33,6 +33,19 @@ body {
   height: 100dvh;
 }
 
+/* Stereo headset test mode: canvas fills the whole screen, no chrome. */
+body.vr-mode #hud-header,
+body.vr-mode #hud-footer,
+body.vr-mode #setup-panel,
+body.vr-mode #touch-controls,
+body.vr-mode #overlays {
+  display: none !important;
+}
+
+body.vr-mode #field {
+  background: #000;
+}
+
 /* ============================ header ============================ */
 .hud {
   flex: 0 0 auto;

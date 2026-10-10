@@ -3,7 +3,7 @@
  * shortcuts and setup-mode pointer dragging.
  */
 import type { ClientMessage, GameView, ServerMessage, StatusView } from "../shared/types.js";
-import { Camera, renderField } from "./canvas.js";
+import { Camera, renderField, renderStereo } from "./canvas.js";
 import { renderFooter, renderHeader, renderOverlays } from "./hud.js";
 import { createSetupPanel, hitTestSetup, type SetupHit, type SetupPanel } from "./setupOverlay.js";
 import { createVirtualInput } from "./virtualInput.js";
@@ -24,6 +24,12 @@ let socket: WebSocket | null = null;
 let cssW = 1;
 let cssH = 1;
 let dpr = window.devicePixelRatio || 1;
+let viewVr = new URLSearchParams(location.search).get("view") === "vr";
+
+function applyViewMode(): void {
+  document.body.classList.toggle("vr-mode", viewVr);
+}
+applyViewMode();
 
 function send(msg: ClientMessage): void {
   if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg));
@@ -80,11 +86,15 @@ function frame(): void {
     setupEl.classList.toggle("hidden", !setupActive);
     resize();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    renderField(ctx, cssW, cssH, latest.game, cam, setupActive);
-    renderHeader(headerEl, latest.game);
-    renderFooter(footerEl, latest.status);
-    renderOverlays(overlaysEl, latest.game, latest.status);
-    if (setupActive) panel.update(latest.status);
+    if (viewVr) {
+      renderStereo(ctx, cssW, cssH, latest.game, cam);
+    } else {
+      renderField(ctx, cssW, cssH, latest.game, cam, setupActive);
+      renderHeader(headerEl, latest.game);
+      renderFooter(footerEl, latest.status);
+      renderOverlays(overlaysEl, latest.game, latest.status);
+      if (setupActive) panel.update(latest.status);
+    }
   }
   requestAnimationFrame(frame);
 }
@@ -98,7 +108,7 @@ function pointerPos(e: PointerEvent): [number, number] {
 }
 
 canvas.addEventListener("pointerdown", (e) => {
-  if (!latest || latest.status.appMode !== "setup") return;
+  if (viewVr || !latest || latest.status.appMode !== "setup") return;
   const [px, py] = pointerPos(e);
   const hit = hitTestSetup(cam, latest.game, px, py);
   if (hit) {
@@ -134,6 +144,11 @@ canvas.addEventListener("pointercancel", endDrag);
 window.addEventListener("keydown", (e) => {
   if (isTextInput(e.target)) return;
   if (virtual.handleKey(e.code, true)) return;
+  if (e.code === "KeyH") {
+    viewVr = !viewVr;
+    applyViewMode();
+    return;
+  }
   if (e.code === "Tab") {
     e.preventDefault();
     send({ type: "mode", mode: latest?.status.appMode === "setup" ? "game" : "setup" });

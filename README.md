@@ -37,34 +37,43 @@ Die Evolution von *WeAre*. Spieler tragen VR-Headsets (Raspberry Pi) und UWB-Tag
 ## Software
 
 ### Architektur (aktueller Stand)
-- **Sender** (`sender_py/`, Python): läuft auf einem MacBook/Mini-PC, das per USB am Anchor hängt. Liest Tag-Distanzen aus, berechnet Koordinaten, enthält die komplette Game-Logik (GameStates, Coin, Scores) und schickt alles per OSC an die Receiver. Headless mit `--headless`, Simulation ohne Hardware mit `--sim`.
-- **Sender (Legacy)** (`sender/`, Processing): der ursprüngliche Processing-Sketch, bleibt als Referenz erhalten.
-- **Receiver** (`receiver/`, Python/Pygame): läuft auf den Raspberry-Pi-VR-Headsets. Empfängt OSC auf Port 8000 und visualisiert das Spiel (Split-Screen-Stereo für beide Augen).
-- **Shared** (`shared/protocol.py`): Gemeinsame Konstanten (GameStates, Startzonen, OSC-Adressen), genutzt von Sender und Receiver.
+- **Sender** (`sender/`, Node.js + TypeScript + Vite): läuft auf einem MacBook/Mini-PC, das per USB am Anchor hängt. Liest Tag-Distanzen aus, berechnet Koordinaten, enthält die komplette Game-Logik (GameStates, Coin Hunt, Scores) und schickt alles per OSC an die Receiver. Dazu eine moderne **Web-App** im Browser: scharfes Retina-Canvas, kabellose Touch-Kalibrierung auf iPad/Handy, Virtual-Play ohne Hardware und ein **Stereo-Headset-Testmodus**.
+- **Receiver** (`receiver/receiver.py`, Python/Pygame): läuft autark auf den beiden **Raspberry Pi 3** in den VR-Headsets. Empfängt OSC auf Port 8000 und rendert den Stereo-Split-Screen. Bewusst schlank (kein Browser), da der Pi 3 nur 1 GB RAM hat.
 - **OSC-Protokoll:** siehe `docs/osc-protocol.md`.
 
-### Python-Sender starten
+### Sender starten (`sender/`)
 ```bash
-pip install -r sender_py/requirements.txt
-python sender_py/main.py            # GUI
-python sender_py/main.py --sim      # virtuelle Spieler (WASD/Pfeile)
-python sender_py/main.py --headless # ohne Fenster
+cd sender
+npm install
+npm start                       # Produktion, Web-UI auf http://<sender-ip>:3000, OSC -> 192.168.1.106:8000
+npm run sim                     # ohne Hardware: virtuelle Spieler (WASD / Pfeiltasten)
+npm start -- --ip 192.168.1.106 --target-port 8000   # Receiver-IP setzen
+npm start -- --headless         # reiner Daemon ohne Web-UI
+npm run dev                     # Entwicklung (Vite 5173 + Server 3000)
+cd ..
 ```
+Im Browser (`http://<sender-ip>:3000`):
+- **TAB** Setup-/Kalibriermodus (Anker-Distanzen, Auto-Layout, Zonen per Touch ziehen, Speichern in `config.json`)
+- **V** Virtual Play, **R** Reset, **SPACE** Rundenstart, **M** Modus, **H** oder `?view=vr` Stereo-Headset-Ansicht (zum Testen auf Smartphone/Laptop)
+
+### Receiver starten (`receiver/`, auf jedem Raspberry Pi 3)
+```bash
+pip install -r receiver/requirements.txt
+python receiver/receiver.py
+```
+Der Receiver ist vollständig autark (keine Imports aus dem Sender).
 
 ### Repo-Struktur
 ```
 WeAre.U/
 ├── README.md              ← diese Datei
 ├── PROJECT-LOG.md         ← Projekt-Historie
-├── sender/                ← Processing-Sketch (Engine-Shell + Game-Modes + OSC-Sender)
-│   ├── sender.pde         ← Engine: Serial/UWB, Trilateration, Filter, Rendering, HUD
-│   ├── Setup.pde          ← Setup-Modus (Anchor-Kalibrierung, Startzonen)
-│   ├── Core_GameMode.pde  ← GameMode-Interface + Engine-State-Machine (WAIT/READY/PLAYING/GAMEOVER)
-│   ├── Core_Entities.pde  ← gemeinsame Helper (fieldBounds, inZone)
-│   ├── Core_Osc.pde       ← OSC-Send-Funktionen
-│   ├── Mode_CoinHunt.pde  ← Mode 1: Coin Hunt
-│   └── VirtualTags.pde    ← virtueller Spielmodus (WASD/Arrow-Keys, Debug ohne Hardware)
-├── receiver/              ← Pygame-Receiver für VR-Headsets
+├── sender/                ← Node.js/TypeScript-Sender + Web-App
+│   ├── src/server/        ← Serial/UWB, Trilateration, Engine, Coin Hunt, OSC, WebSocket
+│   ├── src/client/        ← Canvas-Renderer (Retina + Stereo), HUD, Setup, Virtual Input
+│   ├── src/shared/        ← Protokoll-Konstanten und Typen
+│   └── test/              ← vitest-Tests (Parser, Tracker, Engine/OOB, Hazards, OSC)
+├── receiver/              ← Pygame-Receiver für die Pi-3-VR-Headsets
 │   ├── receiver.py
 │   └── requirements.txt
 └── docs/
@@ -72,4 +81,5 @@ WeAre.U/
     ├── osc-protocol.md    ← OSC-Protokoll zwischen Sender und Receiver
     └── agent-sessions/    ← Session-Logs der Agent-Sitzungen
 ```
+
 

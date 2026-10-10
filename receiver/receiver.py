@@ -5,7 +5,8 @@ from pythonosc.osc_server import BlockingOSCUDPServer
 import pygame
 
 # ============================ CONFIG ============================
-LISTEN_PORT = 8000      # must match OSC_TARGET_PORT in sender/sender.pde
+# Must match the Node sender (sender/): LISTEN_PORT, states, colors, start zones.
+LISTEN_PORT = 8000
 
 # Anchor positions A0..A3 in mm -- standard 3x7m layout.
 # Synced live from the sender via /anchors (setup mode); fallback below.
@@ -16,16 +17,16 @@ TRAIL_MAX = 60
 C_P1 = (0, 200, 255)
 C_P2 = (255, 150, 40)
 
-# Game states -- MUST MATCH sender/sender.pde
+# Game states -- MUST MATCH sender/src/shared/protocol.ts
 STATE_WAIT = 0
 STATE_PLAYING = 1
 STATE_GAMEOVER = 2
 STATE_READY = 3
 
 # Start zones -- synced live from the sender via /start/p1 and /start/p2
-# (setup mode). The values below are only fallbacks.
-P1_START = [1200, 2400]
-P2_START = [5400, 700]
+# (setup mode). The values below are the standard 3x7m layout fallbacks.
+P1_START = [3000, 1500]
+P2_START = [4000, 1500]
 START_ZONE_RADIUS_MM = 250
 
 FULLSCREEN = True       # False -> fixed window (debug on desktop)
@@ -42,28 +43,8 @@ EYE_OFFSET_MM = 150     # horizontal parallax per eye in mm (0 = no stereo)
 FLIP_180 = os.environ.get("BU03_FLIP_180", "1") == "1"
 # ================================================================
 
-# Prefer the shared protocol constants when the repo is available; fall back to
-# the local values above when this file is deployed standalone on a Pi.
-try:
-    import sys as _sys
-    _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from shared import protocol as _p
-    LISTEN_PORT = _p.LISTEN_PORT
-    AX = list(_p.DEFAULT_AX)
-    AY = list(_p.DEFAULT_AY)
-    TRAIL_MAX = _p.TRAIL_MAX
-    C_P1 = _p.C_P1
-    C_P2 = _p.C_P2
-    STATE_WAIT = _p.STATE_WAIT
-    STATE_PLAYING = _p.STATE_PLAYING
-    STATE_GAMEOVER = _p.STATE_GAMEOVER
-    STATE_READY = _p.STATE_READY
-    P1_START = list(_p.DEFAULT_P1_START)
-    P2_START = list(_p.DEFAULT_P2_START)
-    START_ZONE_RADIUS_MM = _p.START_ZONE_RADIUS_MM
-    ENTITY_SHAPES = dict(_p.ENTITY_SHAPES)
-except Exception:
-    pass
+# This receiver is fully self-contained: the protocol constants above mirror
+# sender/src/shared/protocol.ts. No imports from the sender are required.
 
 tags = {}
 packets = 0
