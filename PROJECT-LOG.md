@@ -1,5 +1,69 @@
 # WeAre.U Projektlog
 
+## 10.10.2026
+
+### Was wir heute gemacht haben
+
+- **Sender auf Node.js / TypeScript + Web-App umgebaut** (`sender/`): `serialport`
+  (115200 Baud, `usbmodem`, Auto-Reconnect) mit binärem BU03-`CmdM:4`-Parser,
+  4-Anker-Trilateration (2x2-Determinante), Speed-Clamp (4200 mm/s), EMA (0.30),
+  Engine-State-Machine (WAIT/READY/PLAYING/GAMEOVER) und Coin-Hunt-Mode.
+- **OSC-Client** (Port 8000) exakt nach `docs/osc-protocol.md`; gegen den
+  Python-`python-osc`-Receiver verifiziert (alle Adressen korrekt).
+- **WebSocket-Server + Web-UI** (Vite): Retina-Canvas, HUD (Scores/Timer), mobiler
+  Setup-Modus (TAB) mit Touch-Drag, Virtual Play (WASD/Pfeile) – Operator kann am
+  iPad/Handy im WLAN kalibrieren. Headless-Modus (`--headless`) als Daemon.
+- **Stereo-Headset-Testansicht** im Web-UI (`H` oder `?view=vr`), bildet den
+  Split-Screen/Parallaxe des Pi-Receivers nach.
+- **Aufgeräumt:** alten Processing-Sender (`sender/`) und Python-Sender (`sender_py/`)
+  sowie `shared/` gelöscht; Node-Sender ist jetzt `sender/`. `receiver/receiver.py`
+  ist vollständig autark (keine Imports aus dem Sender).
+- **Receiver bleibt bewusst Pygame** für die Raspberry Pi 3 (1 GB RAM): ~35 MB RAM,
+  1 s Start, stabile 60 FPS – ein Browser wäre unverhältnismässig schwer.
+
+### Branches
+
+- `agent/node-sender` – gemergt nach `main` und gepusht; alle alten `agent/*`-Branches
+  (lokal + remote) gelöscht.
+
+### Files Changed
+
+- `sender/` (neu, Node.js/TypeScript): `src/server/`, `src/client/`, `src/shared/`, `test/`
+- Gelöscht: `sender/*.pde` (Processing), `sender_py/` (Python), `shared/protocol.py`
+- `receiver/receiver.py` (autark gemacht, Standard-Startzonen als Fallback)
+- `README.md`, `.gitignore` aktualisiert
+
+### Notizen
+
+- 24 vitest-Tests grün (Parser, Tracker, Engine/OOB, CoinHunt, OSC-Encoding).
+- Nächster Schritt: Mode 2 (Co-op Levels) – siehe `docs/roadmap.md`.
+
+## 03.09.2026 – Agent-Session (Game-Modes Core + HUD-Redesign)
+
+### Goal
+
+Phase 0 + 1 des Multi-Game-Mode-Plans: Sender in eine Engine-Shell und modulare
+GameMode-Tabs aufteilen, virtuellen Spielmodus ergänzen und das HUD übersichtlicher
+in Eck-Panels organisieren.
+
+### Branches
+
+- `agent/game-modes-core` (bzw. `agent/gui-game-mode-redesign`) – gemergt nach `main`
+
+### Files Changed
+
+- `sender/Core_GameMode.pde` (Engine-State-Machine, Mode-Registry, `requestEnd()`)
+- `sender/Core_Entities.pde` (`fieldBounds`, `inZone`)
+- `sender/Core_Osc.pde` (zentrale OSC-Send-Funktionen)
+- `sender/Mode_CoinHunt.pde` (Coin-Gameplay extrahiert)
+- `sender/VirtualTags.pde` (virtuelle Spieler WASD/Pfeile)
+- `sender/sender.pde` (Engine-Shell + panel-basiertes HUD statt Textblock)
+
+### Session-Logs
+
+- `docs/agent-sessions/2026-09-03-game-modes-core.md`
+- `docs/agent-sessions/2026-09-03-hud-redesign.md`
+
 ## 20.08.2026
 
 ### Was wir heute gemacht haben

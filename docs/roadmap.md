@@ -1,6 +1,6 @@
 # WeAre.U — Roadmap & Resume Notes
 
-> Stand: 2026-09-03 · Branch: `agent/game-modes-core` · last commit `508b000`
+> Stand: 2026-10-10 · Branch: `main` · Sender: **Node.js/TypeScript** (`sender/`)
 >
 > Diese Datei ist der Einstiegspunkt nach einer Pause. Lies sie, dann weisst du
 > wieder, wo du warst und was als Nächstes kommt.
@@ -9,65 +9,93 @@
 
 ## 1. Was ist das Projekt?
 
-VR-Installation „WeAre.U“: 2 Spieler tragen VR-Headsets (Raspberry Pi) + UWB-Tags
+VR-Installation „WeAre.U“: 2 Spieler tragen VR-Headsets (Raspberry Pi 3) + UWB-Tags
 und sehen sich aus der Vogelperspektive als farbige Punkte in einer digitalen Welt.
 Der physische Körper wird zur digitalen Koordinate.
 
 **Architektur (server-authoritative):**
 
-- **`sender/`** (Processing, läuft auf dem MacBook) = die **GameEngine**:
-  liest UWB-Distanzen per Serial, berechnet Positionen (Trilateration + Filter),
-  enthält die komplette Spiellogik und schickt alles per OSC an die Pis.
-- **`receiver/`** (Python/Pygame, läuft auf den 2 Raspberry Pis) = **dummer Renderer**:
-  empfängt OSC, zeichnet das Spiel (Split-Screen-Stereo pro Auge). Keine Spiellogik.
+- **`sender/`** (Node.js + TypeScript + Vite, läuft auf dem MacBook) = die
+  **GameEngine**: liest UWB-Distanzen per Serial (`serialport`), berechnet
+  Positionen (Trilateration + Filter), enthält die komplette Spiellogik, schickt
+  alles per OSC an die Pis. Zusätzlich eine **Web-App** im Browser (Operator-UI:
+  Retina-Canvas, Touch-Setup, Virtual Play, Stereo-Headset-Testansicht).
+- **`receiver/`** (Python/Pygame, läuft auf den 2 Raspberry Pi 3) = **dummer
+  Renderer**: empfängt OSC, zeichnet das Spiel (Split-Screen-Stereo pro Auge).
+  Keine Spiellogik. Vollständig autark (keine Sender-Imports).
 - **OSC-Protokoll v2:** siehe `docs/osc-protocol.md`.
 
 > **Warum alles auf dem MacBook rechnen?** Eine Quelle der Wahrheit → beide Headsets
 > sehen immer dieselbe Welt, kein Desync, und Game-Logik-Änderungen brauchen kein
 > Redeploy auf die Pis. OSC über LAN ist schnell genug (UDP, ~1–5 ms).
+>
+> **Warum bleiben die Pi-Receiver Pygame?** Der Pi 3 hat nur 1 GB RAM. Pygame läuft
+> direkt auf SDL2/KMS (~35 MB RAM, 1 s Start, stabile 60 FPS); ein Browser/Chromium
+> würde ~400 MB belegen und 20 s+ booten. Die Stereo-Ansicht lässt sich aber im
+> Sender-Web-UI mit `H` / `?view=vr` auf Laptop/Handy testen.
 
 ---
 
 ## 2. Dateistruktur (`sender/`)
 
-Processing-Tabs (Reihenfolge: `sender.pde` zuerst, dann alphabetisch; Klassen/Globals
-sind tab-übergreifend nutzbar).
-
-| Datei | Inhalt |
-| --- | --- |
-| `sender.pde` | Engine-Shell: Serial/UWB, Trilateration, Filter, Transform, HUD, Key-Dispatch |
-| `Setup.pde` | Setup-Modus (Anchor-Kalibrierung, Startzonen) — TAB-Taste |
-| `Core_GameMode.pde` | `GameMode`-Interface, Mode-Registry, Engine-State-Machine |
-| `Core_Entities.pde` | Entity-System (`Entity`, spawn/remove/clear, `fieldBounds`, `inZone`) |
-| `Core_Osc.pde` | OSC-Send-Funktionen (Entities, Stats, OOB, Mode, Result, Hit, HUD) |
-| `Mode_CoinHunt.pde` | Mode 1: Coin Hunt (Münzen, Gegner, Lives, Powerups) |
-| `VirtualTags.pde` | Virtueller Spielmodus (WASD/Pfeile, `V`-Toggle) — Debug ohne Hardware |
-| `receiver/receiver.py` | Pygame-Receiver (generischer Entity-Renderer) |
+```
+sender/
+├── package.json            # Scripts: dev, build, start, sim, test, typecheck
+├── tsconfig.json           # Client/Shared
+├── tsconfig.server.json    # Node-Server (NodeNext -> dist/)
+├── vite.config.ts          # Frontend-Build + Dev-Proxy (/ws -> :3000)
+├── index.html
+├── config.json             # Anchor-Layout, Startzonen, Modus (gitignored)
+├── src/shared/             # Protokoll-Konstanten + WebSocket-Typen (Single Source of Truth)
+├── src/server/             # Node-Backend
+│   ├── main.ts             # CLI (--headless/--sim/--ip/--target-port/--web-port/--fps)
+│   ├── app.ts              # Orchestrator (Tracker, Engine, OSC, Serial, Snapshot)
+│   ├── serial.ts           # serialport (115200, usbmodem, Auto-Reconnect) + CmdM:4-Parser
+│   ├── tracker.ts          # Trilateration (2x2-Det), Speed-Clamp 4200 mm/s, EMA 0.30
+│   ├── engine.ts           # State-Machine WAIT/READY/PLAYING/GAMEOVER, Timer, OOB
+│   ├── entities.ts         # EntityManager
+│   ├── modes/base.ts       # GameMode-Interface
+│   ├── modes/coinHunt.ts   # Mode 1: Coin Hunt
+│   ├── osc.ts              # OSC-UDP-Client (Port 8000)
+│   ├── setup.ts            # Kalibrierung, applyLayout (Kreisschnitt), config.json
+│   ├── virtualTags.ts      # Virtueller Spielmodus (WASD/Pfeile)
+│   └── wsServer.ts         # HTTP + WebSocket (statisch + Broadcast 30–60 Hz)
+├── src/client/             # Web-Frontend (Vite)
+│   ├── main.ts             # WS-Client, Render-Loop, Shortcuts, Setup-Drag
+│   ├── canvas.ts           # Retina-Canvas + Stereo-Headset-Ansicht
+│   ├── hud.ts              # Header/Footer/Warnungen (DOM)
+│   ├── setupOverlay.ts     # Touch-Setup-Panel + Hit-Test
+│   └── virtualInput.ts     # Tastatur + Touch-D-Pads
+└── test/                   # vitest (parser, tracker, engine/OOB, coinHunt, osc)
+```
 
 ### Die zwei Kern-Ideen
 
 1. **Engine vs. Modes trennen.** Die Engine besitzt die geteilte State-Machine
    (`WAIT → READY → PLAYING → GAMEOVER`), Startzonen, Countdown, Runden-Timer und
-   Out-of-Bounds. Ein Mode implementiert nur den Runden-Inhalt über das `GameMode`-Interface:
+   Out-of-Bounds. Ein Mode implementiert nur den Runden-Inhalt über das
+   `GameMode`-Interface (`src/server/modes/base.ts`):
 
-   ```java
+   ```ts
    abstract class GameMode {
-     String id, displayName;
-     void onModeEnter() {}
-     abstract void onRoundStart();
-     abstract void update(float dt);
-     abstract int[] scores();
-     abstract void drawWorld();
-     float roundTimeS() { return GAME_TIME_S; }   // < 0 = kein Timer (geplant)
-     String[] hudLines() { return new String[0]; }   // /hud
-     String[] resultText() { return null; }          // /game/result (GAMEOVER)
-     void keyPressed(char k) {}
-     void onPlayerOut(int player) { /* default: Runde endet, anderer gewinnt */ }
+     readonly id: string;
+     readonly displayName: string;
+     onModeEnter(): void {}
+     onRoundEnd(): void {}
+     abstract onRoundStart(): void;
+     abstract update(dt: number): void;
+     scores(): [number, number] { return [0, 0]; }
+     hudLines(): string[] { return []; }
+     resultText(): [string, string] | null { return null; }
+     playerLives(_p: number): number { return -1; }
+     playerEffects(_p: number): string[] { return []; }
+     playerInvuln(_p: number): number { return 0; }
+     onPlayerOut(player: number): void { /* default: Runde endet, anderer gewinnt */ }
    }
    ```
 
 2. **Generisches Entity-Protokoll.** Modes spawnen Entities (`coin`, `enemy`,
-   `powerup`, `zone`, `obstacle`) über `spawnEntity(type, x, y, radius, color)`.
+   `powerup`, `zone`, `obstacle`) über `entities.spawn(type, x, y, radius, color)`.
    Die Engine synct sie per `/ent/upsert` + `/ent/pos` + `/ent/remove`. Der Receiver
    rendert sie generisch aus `type` + Farbe (`ENTITY_SHAPES` in `receiver.py`).
    **Neue Modes brauchen keine Receiver-Änderung.**
@@ -78,11 +106,12 @@ sind tab-übergreifend nutzbar).
 
 | Phase | Ziel | Status |
 |---|---|---|
-| 0 | Shell-Refactor (Tabs, kein Verhaltenswechsel) | ✅ done |
+| 0 | Shell-Refactor | ✅ done |
 | 1 | Virtueller Spielmodus (Debug ohne Hardware) | ✅ done |
 | 2 | OSC v2: generisches Entity-Protokoll + Receiver-Renderer | ✅ done |
-| 3 | Mode-Registry (`M`-Taste, `config.json` Persistenz) | ✅ done |
-| 4 | Mode 1 – Coin Hunt (Münzen, Gegner, Lives, Powerups) | ✅ done (getunt) |
+| 3 | Mode-Registry (`M`-Taste, `config.json`-Persistenz) | ✅ done |
+| 4 | Mode 1 – Coin Hunt (Münzen, Hazards, Lives, Powerups) | ✅ done (getunt) |
+| 4b | **Node.js/TypeScript-Umbau + Web-UI + Stereo-Testansicht** | ✅ done |
 | **5** | **Mode 2 – Co-op Levels (Zielfelder + bewegliche Hindernisse)** | ⬅️ **NÄCHSTER SCHRITT** |
 | 6 | Polish (Sound, Balance, Field-Profiles, Attract-Screen) | ⏳ offen |
 
@@ -104,14 +133,15 @@ stehen, um ins nächste Level zu kommen. Zwischen den Levels bewegen sich Hinder
 
 ### 4.3 Umsetzung
 
-1. **Neue Datei `sender/Mode_Coop.pde`** — Mode registrieren in `Core_GameMode.pde`:
-   `GameMode[] modes = { new ModeCoinHunt(), new ModeCoop() };`
+1. **Neue Datei `sender/src/server/modes/coop.ts`** — Mode in `engine.ts`
+   registrieren: `this.modes = [new CoinHunt(this), new Coop(this)];`.
 
-2. **Kleine Engine-Erweiterung (`Core_GameMode.pde`):**
-   - `GameMode.roundTimeS()` hinzufügen (Default `return GAME_TIME_S;`).
-   - `updateGame()` nutzt `roundTimeS()`: bei `> 0` normaler Timer; bei `< 0`
+2. **Kleine Engine-Erweiterung (`engine.ts`):**
+   - `GameMode.roundTimeS()` hinzufügen (Default `return GameEngine.GAME_TIME_S;`).
+   - `update()` nutzt `roundTimeS()`: bei `> 0` normaler Timer; bei `< 0`
      `timeLeft = -1` (Signal „kein Timer“ an den Receiver) und **kein** Auto-Ende.
    - Mode 2 überschreibt `roundTimeS()` mit `return -1;`.
+   - Receiver/Web-HUD zeichnet bei `time_left < 0` keinen Countdown.
 
 3. **Kleiner Receiver-Fix (`receiver.py`):**
    - `draw_game_hud()` zeichnet den Countdown nur wenn `time_left >= 0`.
@@ -133,54 +163,35 @@ stehen, um ins nächste Level zu kommen. Zwischen den Levels bewegen sich Hinder
    - Ziel: 4 Start-Levels als Daten-Array.
 
 6. **Entities:**
-   - Zielfeld → `zone` (Ring, Spielerfarbe `C_T0`/`C_T1`, `ZONE_RADIUS_MM = 500`).
+   - Zielfeld → `zone` (Ring, Spielerfarbe `C_P1`/`C_P2`, `ZONE_RADIUS_MM = 500`).
    - Hindernis → `obstacle` (Rechteck, `OBS_RADIUS_MM`), Bewegung über `/ent/pos`.
 
 7. **Hooks:**
    - `hudLines()` → `"LEVEL 1/4"`.
-   - `resultText()` → `"LEVEL 2 GESCHAFFT!"` / `"ALLE LEVELS GESCHAFFT!"` /
-     `"GETROFFEN!"`.
+   - `resultText()` → `"LEVEL 2 GESCHAFFT!"` / `"ALLE LEVELS GESCHAFFT!"` / `"GETROFFEN!"`.
 
 ### 4.4 Konzept-Skizze (Pseudocode)
 
-```java
-class ModeCoop extends GameMode {
-  float ZONE_RADIUS_MM = 500, ZONE_HOLD_S = 1.5, OBS_RADIUS_MM = 300, OBS_TOUCH_RADIUS_MM = 450;
+```ts
+class Coop extends GameMode {
+  readonly id = "coop";
+  readonly displayName = "Co-op Levels";
+  // ZONE_RADIUS_MM=500, ZONE_HOLD_S=1.5, OBS_RADIUS_MM=300, OBS_TOUCH_RADIUS_MM=450
 
-  int currentLevel = 0;
-  boolean runComplete = false;
-  float hold = 0;
-  String resultT = null, resultS = null;
-  Entity z1, z2;
-  ArrayList<Obstacle> obstacles = new ArrayList<Obstacle>();
+  currentLevel = 0; runComplete = false; hold = 0;
+  resultT: string | null = null; resultS: string | null = null;
+  z1!: Entity; z2!: Entity; obstacles: Obstacle[] = [];
 
-  float roundTimeS() { return -1; }                 // kein Timer
-
-  void onModeEnter() { currentLevel = 0; runComplete = false; }
-
-  void onRoundStart() {
-    if (runComplete) { currentLevel = 0; runComplete = false; }
-    resultT = null; resultS = null;
-    setupLevel(currentLevel);
+  override roundTimeS() { return -1; }            // kein Timer
+  override onModeEnter() { this.currentLevel = 0; this.runComplete = false; }
+  override onRoundStart() {
+    if (this.runComplete) { this.currentLevel = 0; this.runComplete = false; }
+    this.resultT = null; this.setupLevel(this.currentLevel);
   }
-
-  void update(float dt) {
-    updateObstacles(dt);
-    checkObstacleHit();
-    checkZones(dt);   // shared 1.5s hold -> completeLevel()
-  }
-
-  void completeLevel() {
-    if (currentLevel + 1 >= levels.length) { resultT="GESCHAFFT!"; resultS="ALLE LEVELS GESCHAFFT!"; runComplete=true; }
-    else { resultT = "LEVEL " + (currentLevel+1) + " GESCHAFFT!"; resultS = "Weiter!"; currentLevel++; }
-    requestEnd();
-  }
-
-  void hitObstacle() { resultT = "GETROFFEN!"; resultS = "Nochmal!"; requestEnd(); }
-
-  int[] scores() { return new int[] { 0, 0 }; }
-  String[] hudLines() { return new String[] { "LEVEL " + (currentLevel+1) + "/" + levels.length }; }
-  String[] resultText() { return resultT == null ? null : new String[] { resultT, resultS }; }
+  override update(dt: number) { this.updateObstacles(dt); this.checkObstacleHit(); this.checkZones(dt); }
+  override scores(): [number, number] { return [0, 0]; }
+  override hudLines() { return [`LEVEL ${this.currentLevel + 1}/${LEVELS.length}`]; }
+  override resultText() { return this.resultT ? [this.resultT, this.resultS ?? ""] : null; }
 }
 ```
 
@@ -189,7 +200,7 @@ class ModeCoop extends GameMode {
 ## 5. Phase 6 — Polish (offen, Ideen)
 
 - Audio/Haptik-Cues (Münze, Treffer, Level-Erfolg).
-- Balance von Mode 1 (Enemy-Speed, Powerup-Raten, Lives).
+- Balance von Mode 1 (Hazard-Speed, Powerup-Raten, Lives).
 - „Field-Profiles“ im Setup-Modus: mehrere Venue-Layouts speichern (3×7 m, 7×7 m, …).
 - Attract/Idle-Screen für die Installation (wenn niemand spielt).
 - Optional: OSC-Heartbeat / Reconnect-Robustheit.
@@ -198,12 +209,16 @@ class ModeCoop extends GameMode {
 
 ## 6. Wie bauen & testen
 
-### Sender kompilieren (Mac, Processing 4.5.2)
+### Sender (Node.js/TypeScript)
 
 ```bash
-"/Applications/Processing.app/Contents/MacOS/processing" cli \
-  --sketch=/Users/simonfluckiger/my-code-projects/WeAre.U/sender \
-  --output=/tmp/sender-build --build
+cd sender
+npm install
+npm run typecheck          # tsc, beide Configs
+npm test                   # vitest (24 Tests)
+npm run build              # Vite-Client + tsc-Server -> dist/
+npm run sim                # virtuelle Spieler (WASD = P1, Pfeile = P2), Web-UI :3000
+npm start -- --headless    # reiner Daemon, kein Web-UI
 ```
 
 ### Receiver prüfen
@@ -220,23 +235,22 @@ SDL_VIDEODRIVER=dummy BU03_FLIP_180=0 python3 receiver/receiver.py
 # in anderem Terminal: pythonosc SimpleUDPClient auf 127.0.0.1:8000
 ```
 
-### Virtueller Spielmodus (Debug ohne UWB)
+### Operator-Shortcuts (Web-UI)
 
-- Sketch starten → `V` drücken → **WASD = P1**, **Pfeiltasten = P2**.
-- `M` = Mode wechseln, `SPACE` = Runde starten, `TAB` = Setup-Modus,
-  `1/2` = Filter, `4` = EMA-Alpha.
+- `V` = Virtual Play, `R` = Reset, `SPACE` = Rundenstart, `M` = Mode wechseln,
+  `TAB` = Setup-Modus, `H` = Stereo-Headset-Ansicht (`?view=vr`).
 
 ---
 
 ## 7. Wichtige Werte zum Nachjustieren (Mode 1)
 
-Alle in `Mode_CoinHunt.pde`:
+Alle in `sender/src/server/modes/coinHunt.ts`:
 
 | Konstante | Wert | Bedeutung |
 | --- | --- | --- |
 | `COLLECT_RADIUS_MM` | 300 | Münz-Pickup-Distanz |
-| `ENEMY_SPAWN_COINS_1 / 2` | 3 / 6 | Gefahr 1 / 2 spawnen nach N Münzen (beide zusammen) |
-| `ENEMY_SPEED_MM_S` | 600 | Gefahr-Geschwindigkeit (diagonal, prallt ab) |
+| `ENEMY_SPAWN_COINS_1 / 2` | 3 / 6 | Hazard 1 / 2 spawnen nach N Münzen (beide zusammen) |
+| `ENEMY_SPEED_MM_S` | 600 | Hazard-Geschwindigkeit (diagonal, prallt ab) |
 | `ENEMY_CATCH_RADIUS_MM` | 350 | Treffer-Distanz |
 | `START_LIVES` | 3 | Leben pro Spieler |
 | `POWERUP_INTERVAL_S` | 8 | Abstand zwischen Powerups |
@@ -247,6 +261,6 @@ Alle in `Mode_CoinHunt.pde`:
 
 ## 8. Git-Hinweise
 
-- Branch: `agent/game-modes-core` (Arbeit noch nicht auf `main` gemergt).
+- Aktiver Branch: `main` (Node-Stack ist gemergt und gepusht).
 - Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`.
 - Session-Log nach Abschluss: `docs/agent-sessions/YYYY-MM-DD-<task>.md`.

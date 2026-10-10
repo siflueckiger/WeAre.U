@@ -1,7 +1,7 @@
 # OSC-Protokoll: Sender → Receiver
 
 - **Port:** 8000 (UDP)
-- **Richtung:** `sender/` (Processing) sendet, `receiver/` (Pygame, VR-Headsets) empfängt
+- **Richtung:** `sender/` (Node.js/TypeScript) sendet, `receiver/` (Pygame, VR-Headsets auf Raspberry Pi 3) empfängt
 - **Einheiten:** alle Koordinaten in mm, X/Y im Spielfeld-Koordinatensystem (Anchors definieren es)
 
 ## Adressen
@@ -61,7 +61,7 @@ Neue Typen brauchen nur eine zusätzliche Shape in `receiver.py` → `ENTITY_SHA
 
 ## Mode-Registry (Sender, M-Taste)
 
-- `M` wechselt den aktiven Mode; wird in `data/config.json` unter `"MODE"` gespeichert.
+- `M` wechselt den aktiven Mode; wird in `sender/config.json` unter `"MODE"` gespeichert.
 - Mode-Wechsel sendet `/game/mode` an die Receiver, setzt State auf WAIT und leert Entities.
 
 ## Out-of-Bounds (`/game/oob`)
@@ -74,6 +74,6 @@ Neue Typen brauchen nur eine zusätzliche Shape in `receiver.py` → `ENTITY_SHA
 ## Setup-Modus (Sender, TAB-Taste)
 
 - Anchor-Distanzen eingeben → Auto-Layout; Startzonen per Tag-Capture (Z/X) oder Maus-Drag.
-- `V` speichert `data/config.json`, `R` setzt Standard-Layout 3x7 m zurück.
+- `V` speichert `sender/config.json`, `R` setzt Standard-Layout 3x7 m zurück.
 - Änderungen werden live per `/anchors`, `/start/p1`, `/start/p2` an die Receiver gesynct.
 - Standard-Layout: A0=(0,3000), A1=(0,0), A2=(7000,0), A3=(7000,3000); P1_START=(3000,1500), P2_START=(4000,1500).

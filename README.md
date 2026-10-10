@@ -11,9 +11,9 @@ Die Evolution von *WeAre*. Spieler tragen VR-Headsets (Raspberry Pi) und UWB-Tag
 | :-------------- | :----: | :--------------------------------------------- | :-------------------------------------------------------------------------------------------------------------- | :----------------- | :-------------- |
 | **Tag**         | 2      | Ai-Thinker UWB Technology BU03 DW3000 Plan Kit | Pro Spieler ein Tag auf dem VR Headset                                                                          | -                  | -               |
 | **Anchor**      | 4      | Ai-Thinker UWB Technology BU03 DW3000 Plan Kit | Positioniert um das Spielfeld herum, definieren die Anchor das Koordinatensystem und messen Distanzen zu Tags   | -                  | Processor       |
-| **Processor**   | 1      | [MICROCONTROLLER]                              | Verarbeitet die Distanzen zwischen Anchors-Tags und berechnet Koordinaten der Spieler                           | Anchors            | GameEngine      |
-| **GameEngine**  | 1      | [MICROCONTROLLER]                              | Steuert das ganze Spiel mit allen GameStates und Spiellogiken                                                   | Processor          | VR-Brille       |
-| **VR-Brille**   | 2      | RaspberryPi [VERSION] mit [BILDSCHIRM]         | Pro Spieler werden Koordinaten empfangen und das Spiel wird visualisiert                                        | GameEngine         | -               |
+| **Processor**   | 1      | MacBook/Mini-PC (Node.js Sender)               | Liest UWB-Distanzen per USB (`serialport`) und berechnet Koordinaten (Trilateration + Filter)                   | Anchors            | GameEngine      |
+| **GameEngine**  | 1      | MacBook/Mini-PC (Node.js Sender)               | Steuert das ganze Spiel mit allen GameStates und Spiellogiken, sendet OSC                                       | Processor          | VR-Brille       |
+| **VR-Brille**   | 2      | Raspberry Pi 3 mit VR-Display (800x480)        | Pro Spieler werden Koordinaten empfangen und das Spiel wird visualisiert (Python/Pygame)                         | GameEngine         | -               |
 | **Headset**     | 2      | _Tag und VR-Brille_                            | -                                                                                                               | -                  | -               |
 
 ### Anchor
@@ -21,18 +21,18 @@ Die Evolution von *WeAre*. Spieler tragen VR-Headsets (Raspberry Pi) und UWB-Tag
 - **Powerbank:** ??
 
 ### Headsets
-- **RaspberryPi:** 2x RaspberryPi ??
-  - *Processing* für die Visualisierung
-  - Raspberry Pi with Desktop Raspian is easyier for the Visualisation stuff, no need for X11 etc.
+- **RaspberryPi:** 2x Raspberry Pi 3
+  - *Python/Pygame* für die Visualisierung (Split-Screen-Stereo, 800x480)
+  - Läuft direkt über SDL2/KMS – kein Desktop/X11 nötig (`SDL_VIDEODRIVER=KMSDRM`)
 - **VR Screen:** 2x ??
 - **Microcontroller:** 2x Ai-Thinker UWB Technologie BU03 DW3000 Plan Kit Positionsgenauigkeit 10cm
 - **Powerbank:** 2x ??
 
 ### Processor
-- **Koordinaten-Rechner:** 1x ESP32 oder Pi Pico oder so, um UWB Distanztdaten in Koordinaten umzuwandeln
+- **Koordinaten-Rechner:** MacBook/Mini-PC mit dem **Node.js-Sender** (`sender/`): liest UWB-Distanzen per USB und wandelt sie in Koordinaten um (Trilateration + Filter).
 
 ### GameEngine
-- **GameEngine:** 1x ESP32 oder Pi Pico oder so, um die Game-States zu steuern und Daten per OSC an die Spieler zu schicken
+- **GameEngine:** derselbe Node.js-Sender: steuert die Game-States und schickt die Daten per OSC an die Headsets.
 
 ## Software
 
