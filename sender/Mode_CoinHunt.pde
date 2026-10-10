@@ -1,8 +1,9 @@
 // ============================ MODE: COIN HUNT (Mode 1) ============================
-// Competitive coin collection. After a combined coin threshold two enemies spawn
-// (one per player, chasing their target). Players have lives; enemies cost lives.
-// Powerups spawn over time and change the rules (never movement -- players move
-// physically). Editing this file cannot break other modes or the engine.
+// Competitive coin collection. Hazards spawn progressively as coins are
+// collected: they roam the field as bouncing squares and cost a life on touch
+// (relevant to BOTH players). Powerups spawn over time and change the rules
+// (never movement -- players move physically). Editing this file cannot break
+// other modes or the engine.
 
 class ModeCoinHunt extends GameMode {
 
@@ -14,12 +15,13 @@ class ModeCoinHunt extends GameMode {
   float COIN_VISUAL_MM          = 120;    // coin size (visual, sent to receiver)
   color C_COIN = color(255, 220, 40);
 
-  // --- enemies ---
-  int   ENEMY_AFTER_COINS        = 5;      // combined coins before enemies spawn
-  float ENEMY_SPEED_MM_S         = 400;    // chase speed
-  float ENEMY_CATCH_RADIUS_MM    = 350;    // touch distance to catch a player
-  float ENEMY_MIN_DIST_PLAYER_MM = 1200;   // spawn/respawn away from players
-  float ENEMY_VISUAL_MM          = 200;
+  // --- hazards (bouncing, neutral to both players) ---
+  float ENEMY_SPEED_MM_S       = 600;    // constant travel speed
+  float ENEMY_CATCH_RADIUS_MM  = 350;    // touch distance to cost a life
+  float ENEMY_VISUAL_MM        = 200;    // half-size; also wall bounce margin
+  float ENEMY_SPAWN_SAFE_MM    = 1200;   // spawn away from players
+  int   ENEMY_SPAWN_COINS_1    = 3;      // 1st hazard after N coins (combined)
+  int   ENEMY_SPAWN_COINS_2    = 6;      // 2nd hazard after N coins (combined)
   color C_ENEMY = color(255, 60, 60);
 
   // --- lives ---
@@ -48,7 +50,6 @@ class ModeCoinHunt extends GameMode {
   boolean nextCoinDouble = false;  // next coin (by either player) counts double
 
   ArrayList<Enemy> enemies = new ArrayList<Enemy>();
-  boolean enemiesSpawned = false;
 
   Entity powerup = null;
   int powerupType = PU_MAGNET;
@@ -63,7 +64,6 @@ class ModeCoinHunt extends GameMode {
     coin = null;
     powerup = null;
     enemies.clear();
-    enemiesSpawned = false;
     freezeAll = 0;
     nextCoinDouble = false;
     for (int i = 0; i < 2; i++) {
@@ -80,7 +80,6 @@ class ModeCoinHunt extends GameMode {
     coin = null;
     powerup = null;
     enemies.clear();
-    enemiesSpawned = false;
     for (int i = 0; i < 2; i++) {
       lives[i] = START_LIVES;
       invuln[i] = 0;
@@ -231,60 +230,65 @@ class ModeCoinHunt extends GameMode {
                        random(b[2] + COIN_MARGIN_MM, b[3] - COIN_MARGIN_MM), COIN_VISUAL_MM, C_COIN);
   }
 
-  // ============================ ENEMIES ============================
+  // ============================ HAZARDS ============================
 
+  // Progressive difficulty: one hazard after ENEMY_SPAWN_COINS_1 coins, a
+  // second after ENEMY_SPAWN_COINS_2 (counted over both players combined).
   void maybeSpawnEnemies() {
-    if (!enemiesSpawned && (scoreP1 + scoreP2) >= ENEMY_AFTER_COINS) {
-      enemiesSpawned = true;
-      spawnEnemy(0);   // enemy 1 targets P1
-      spawnEnemy(1);   // enemy 2 targets P2
-      println("Enemies spawned: one per player");
+    int total = scoreP1 + scoreP2;
+    if (enemies.size() == 0 && total >= ENEMY_SPAWN_COINS_1) {
+      spawnEnemy();
+    } else if (enemies.size() == 1 && total >= ENEMY_SPAWN_COINS_2) {
+      spawnEnemy();
     }
   }
 
-  void spawnEnemy(int target) {
-    float[] pos = randomFarPoint(ENEMY_MIN_DIST_PLAYER_MM);
+  // Spawn a hazard at a random safe point, moving diagonally at constant speed.
+  // The angle avoids near-axis travel so it always sweeps the whole field.
+  void spawnEnemy() {
+    float[] pos = randomFarPoint(ENEMY_SPAWN_SAFE_MM);
+    float speed = ENEMY_SPEED_MM_S;
+    float ang = radians(random(25, 65)) + int(random(4)) * HALF_PI;
+    float vx = cos(ang) * speed;
+    float vy = sin(ang) * speed;
     Entity e = spawnEntity("enemy", pos[0], pos[1], ENEMY_VISUAL_MM, C_ENEMY);
-    enemies.add(new Enemy(e, target));
+    enemies.add(new Enemy(e, vx, vy));
+    println("Hazard spawned (" + enemies.size() + ")");
   }
 
+  // Move every hazard and bounce it off the field walls; a hazard is neutral and
+  // threatens BOTH players. Frozen hazards stand still but are still solid.
   void updateEnemies(float dt) {
+    float[] b = fieldBounds();
+    float m = ENEMY_VISUAL_MM;
     for (Enemy en : enemies) {
-      int t = targetFor(en);
-      TagData td = tags.get(t == 0 ? TAG0_ID : TAG1_ID);
-      if (freezeAll <= 0 && td != null && td.pos != null) {
-        float dx = td.pos.x - en.ent.x;
-        float dy = td.pos.y - en.ent.y;
-        float d = sqrt(dx * dx + dy * dy);
-        if (d > 1) {
-          float step = ENEMY_SPEED_MM_S * dt;
-          en.ent.x += dx / d * step;
-          en.ent.y += dy / d * step;
+      if (freezeAll <= 0) {
+        en.ent.x += en.vx * dt;
+        en.ent.y += en.vy * dt;
+        if (en.ent.x < b[0] + m) { en.ent.x = b[0] + m; en.vx = abs(en.vx); }
+        if (en.ent.x > b[1] - m) { en.ent.x = b[1] - m; en.vx = -abs(en.vx); }
+        if (en.ent.y < b[2] + m) { en.ent.y = b[2] + m; en.vy = abs(en.vy); }
+        if (en.ent.y > b[3] - m) { en.ent.y = b[3] - m; en.vy = -abs(en.vy); }
+      }
+      for (int p = 0; p < 2; p++) {
+        if (invis[p] > 0 || invuln[p] > 0) continue;   // phased-out or just hit
+        TagData td = tags.get(p == 0 ? TAG0_ID : TAG1_ID);
+        if (td == null || td.pos == null) continue;
+        if (dist(en.ent.x, en.ent.y, td.pos.x, td.pos.y) < ENEMY_CATCH_RADIUS_MM) {
+          catchPlayer(p, en);
         }
       }
-      if (td != null && td.pos != null && invuln[t] <= 0
-          && dist(en.ent.x, en.ent.y, td.pos.x, td.pos.y) < ENEMY_CATCH_RADIUS_MM) {
-        catchPlayer(t, en);
-      }
     }
   }
 
-  // A player's enemy chases them; if the target is invisible, chase the other.
-  int targetFor(Enemy en) {
-    int t = en.target;
-    if (invis[t] > 0) t = 1 - t;
-    return t;
-  }
-
+  // A hazard touched a player: costs a life, then bounces off and keeps going.
   void catchPlayer(int player, Enemy en) {
     lives[player]--;
     invuln[player] = INVULN_S;
-    println("P" + (player + 1) + " caught! lives=" + lives[player]);
+    println("P" + (player + 1) + " hit by hazard! lives=" + lives[player]);
     sendHit(player, INVULN_S);   // flash + blink on the receiver
-    float[] pos = randomFarPoint(ENEMY_MIN_DIST_PLAYER_MM);
-    en.ent.x = pos[0];
-    en.ent.y = pos[1];
-    en.ent.needsUpsert = true;
+    en.vx = -en.vx;              // deflect instead of teleporting
+    en.vy = -en.vy;
     if (lives[player] <= 0) {
       roundWinner = (player == 0) ? 2 : 1;
       requestEnd();
@@ -394,10 +398,11 @@ class ModeCoinHunt extends GameMode {
 
 class Enemy {
   Entity ent;
-  int target;   // 0 = P1, 1 = P2
+  float vx, vy;   // velocity in mm/s
 
-  Enemy(Entity e, int t) {
+  Enemy(Entity e, float vx, float vy) {
     ent = e;
-    target = t;
+    this.vx = vx;
+    this.vy = vy;
   }
 }

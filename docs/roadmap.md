@@ -235,9 +235,9 @@ Alle in `Mode_CoinHunt.pde`:
 | Konstante | Wert | Bedeutung |
 | --- | --- | --- |
 | `COLLECT_RADIUS_MM` | 300 | Münz-Pickup-Distanz |
-| `ENEMY_AFTER_COINS` | 5 | Gegner spawnen nach N Münzen (beide zusammen) |
-| `ENEMY_SPEED_MM_S` | 400 | Gegner-Geschwindigkeit |
-| `ENEMY_CATCH_RADIUS_MM` | 350 | Fang-Distanz |
+| `ENEMY_SPAWN_COINS_1 / 2` | 3 / 6 | Gefahr 1 / 2 spawnen nach N Münzen (beide zusammen) |
+| `ENEMY_SPEED_MM_S` | 600 | Gefahr-Geschwindigkeit (diagonal, prallt ab) |
+| `ENEMY_CATCH_RADIUS_MM` | 350 | Treffer-Distanz |
 | `START_LIVES` | 3 | Leben pro Spieler |
 | `POWERUP_INTERVAL_S` | 8 | Abstand zwischen Powerups |
 | `MAGNET_PULL_MM_S` | 700 | Magnet: Coin wird zum Spieler gezogen |
