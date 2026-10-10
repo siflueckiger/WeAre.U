@@ -42,6 +42,29 @@ EYE_OFFSET_MM = 150     # horizontal parallax per eye in mm (0 = no stereo)
 FLIP_180 = os.environ.get("BU03_FLIP_180", "1") == "1"
 # ================================================================
 
+# Prefer the shared protocol constants when the repo is available; fall back to
+# the local values above when this file is deployed standalone on a Pi.
+try:
+    import sys as _sys
+    _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from shared import protocol as _p
+    LISTEN_PORT = _p.LISTEN_PORT
+    AX = list(_p.DEFAULT_AX)
+    AY = list(_p.DEFAULT_AY)
+    TRAIL_MAX = _p.TRAIL_MAX
+    C_P1 = _p.C_P1
+    C_P2 = _p.C_P2
+    STATE_WAIT = _p.STATE_WAIT
+    STATE_PLAYING = _p.STATE_PLAYING
+    STATE_GAMEOVER = _p.STATE_GAMEOVER
+    STATE_READY = _p.STATE_READY
+    P1_START = list(_p.DEFAULT_P1_START)
+    P2_START = list(_p.DEFAULT_P2_START)
+    START_ZONE_RADIUS_MM = _p.START_ZONE_RADIUS_MM
+    ENTITY_SHAPES = dict(_p.ENTITY_SHAPES)
+except Exception:
+    pass
+
 tags = {}
 packets = 0
 last_packet_ms = 0
