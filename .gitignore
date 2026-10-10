@@ -60,3 +60,11 @@ temp/
 # ========================
 
 docs/hardware/references/
+3DPrint/
+
+## ========================
+# Node / Sender
+# ========================
+
+sender/node_modules/
+sender/dist/
