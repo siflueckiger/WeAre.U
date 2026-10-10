@@ -128,16 +128,20 @@ class ModeCoinHunt extends GameMode {
 
   String[] hudLines() {
     ArrayList<String> lines = new ArrayList<String>();
-    lines.add("P1 lives " + lives[0] + "    P2 lives " + lives[1]);
     if (freezeAll > 0) lines.add("ENEMIES FROZEN " + (int)freezeAll + "s");
     if (nextCoinDouble) lines.add("NEXT COIN x2");
-    for (int p = 0; p < 2; p++) {
-      String fx = "";
-      if (magnet[p] > 0) fx += "MAGNET ";
-      if (invis[p] > 0) fx += "INVIS ";
-      if (!fx.isEmpty()) lines.add("P" + (p + 1) + ": " + fx.trim());
-    }
     return lines.toArray(new String[0]);
+  }
+
+  int playerLives(int player) {
+    return lives[player];
+  }
+
+  String[] playerEffects(int player) {
+    ArrayList<String> fx = new ArrayList<String>();
+    if (magnet[player] > 0) fx.add("MAGNET " + (int)ceil(magnet[player]) + "s");
+    if (invis[player] > 0)  fx.add("INVIS " + (int)ceil(invis[player]) + "s");
+    return fx.toArray(new String[0]);
   }
 
   // ============================ TIMERS ============================
