@@ -24,6 +24,11 @@ abstract class GameMode {
   // Per-mode HUD text shown on the receiver (sent as /hud). Empty by default.
   String[] hudLines() { return new String[0]; }
 
+  // Per-player status for the sender's game header. lives < 0 = mode has no
+  // lives. effects are short strings shown under the score (e.g. "MAGNET 3s").
+  int playerLives(int player) { return -1; }
+  String[] playerEffects(int player) { return new String[0]; }
+
   // GAMEOVER text for the receiver (sent as /game/result).
   // Returns { title, subtitle } or null for the engine default (winner text).
   String[] resultText() { return null; }

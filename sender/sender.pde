@@ -105,7 +105,7 @@ int roundWinner = -1;   // -1 = derive from scores, 1/2 = forced winner
 int appMode = MODE_GAME;
 
 boolean hudDebug = false;   // D: full tag details in player cards
-boolean hudKeys  = true;    // H: show key help panel
+boolean hudKeys  = false;   // H: full key help overlay
 
 void setup() {
   size(1000, 800);
@@ -416,10 +416,17 @@ void updateTransform() {
   float h = maxy - miny;
   if (w < 1) w = 1000;
   if (h < 1) h = 1000;
-  float margin = 80;
-  s = min((width - 2 * margin) / w, (height - 2 * margin) / h);
-  ox = (width - w * s) / 2 - minx * s;
-  oy = (height + h * s) / 2 + miny * s;
+  // Keep the field clear of the header (top) and footer (bottom) in game mode,
+  // so no HUD panel ever overlaps the action.
+  float top = (appMode == MODE_GAME) ? HUD_HEADER_H + 16 : 80;
+  float bottom = (appMode == MODE_GAME) ? height - HUD_FOOTER_H - 16 : height - 80;
+  float sideMargin = (appMode == MODE_GAME) ? 24 : 80;
+  float availW = width - 2 * sideMargin;
+  float availH = bottom - top;
+  s = min(availW / w, availH / h);
+  float fieldTop = top + (availH - h * s) / 2;
+  ox = sideMargin + (availW - w * s) / 2 - minx * s;
+  oy = fieldTop + maxy * s;
 }
 
 PVector scr(float x, float y) {
@@ -523,20 +530,22 @@ void drawTag(int id, color c, String label) {
 }
 
 // ============================ HUD ============================
-// Panel layout: scoreboard top-center, warnings below it, player cards on the
-// left/right edges, system status bottom-left, mode info bottom-right and key
-// help top-right (H toggles, D toggles tag debug details).
+// Game view layout: a unified header across the top (P1 | center | P2), a
+// completely free playing field in the middle, floating warnings only when
+// active, and a compact status footer at the bottom. Player debug details are
+// hidden behind the D key; the full key list is a centered overlay (H).
+
+int HUD_HEADER_H = 96;
+int HUD_FOOTER_H = 30;
 
 void drawHud() {
   textSize(12);
   textAlign(LEFT, TOP);
-  drawScoreboard();
+  drawGameHeader();
   drawWarnings();
-  drawPlayerCard(TAG0_ID, "P1", C_T0, 10, 200);
-  drawPlayerCard(TAG1_ID, "P2", C_T1, width - 10, 200);
-  drawSystemPanel();
-  drawModePanel();
-  if (hudKeys) drawKeyPanel();
+  drawFooter();
+  if (hudDebug) drawDebugCards();
+  if (hudKeys) drawKeyHelp();
 }
 
 // Panel background + title bar. Body text is drawn by the caller.
@@ -558,22 +567,103 @@ color stateColor(int s) {
   return color(255, 255, 255);
 }
 
-void drawScoreboard() {
-  int w = 380, h = 96, x = width / 2 - w / 2, y = 10;
-  hudPanel(x, y, w, h, currentMode.displayName + "  |  " + stateName(gameState), stateColor(gameState));
-  int[] sc = currentMode.scores();
+void drawGameHeader() {
+  noStroke();
+  fill(12, 12, 18, 230);
+  rect(0, 0, width, HUD_HEADER_H);
+  // subtle separator
+  stroke(60);
+  line(0, HUD_HEADER_H, width, HUD_HEADER_H);
+  noStroke();
+
+  // ----- center: mode, big value, state -----
+  color sc = stateColor(gameState);
   textAlign(CENTER, TOP);
-  textSize(30);
-  fill(C_T0);
-  text("P1 " + sc[0], x + w / 2 - 85, y + 22);
-  fill(255);
-  text(":", x + w / 2, y + 24);
-  fill(C_T1);
-  text(sc[1] + " P2", x + w / 2 + 85, y + 22);
-  fill(255, 230, 120);
-  textSize(20);
-  text("time " + nf(timeLeft, 0, 0) + "s", x + w / 2, y + 56);
+  textSize(13);
+  fill(200);
+  text(currentMode.displayName.toUpperCase(), width / 2.0f, 8);
+
+  textSize(36);
+  fill(sc);
+  text(centerValueText(), width / 2.0f, 24);
+
   textSize(12);
+  fill(sc);
+  text(stateName(gameState), width / 2.0f, HUD_HEADER_H - 32);
+
+  String[] lines = currentMode.hudLines();
+  if (lines != null && lines.length > 0) {
+    textSize(11);
+    fill(235, 210, 150);
+    text(join(lines, "    "), width / 2.0f, HUD_HEADER_H - 16);
+  }
+
+  // ----- sides -----
+  drawHeaderPlayer(0, 16);
+  drawHeaderPlayer(1, width - 16);
+}
+
+String centerValueText() {
+  if (gameState == STATE_WAIT) {
+    return (inZone(tags.get(TAG0_ID), P1_START) && inZone(tags.get(TAG1_ID), P2_START))
+      ? "STARTING" : "WAITING";
+  }
+  if (gameState == STATE_READY) return "" + max(1, (int)ceil(timeLeft));
+  if (gameState == STATE_PLAYING) return nf(timeLeft, 0, 0) + "s";
+  return "GAME OVER";
+}
+
+void drawHeaderPlayer(int p, float x) {
+  color c = (p == 0) ? C_T0 : C_T1;
+  boolean left = (p == 0);
+  int[] sc = currentMode.scores();
+
+  textAlign(left ? LEFT : RIGHT, TOP);
+  textSize(13);
+  fill(c);
+  text("P" + (p + 1), x, 8);
+
+  textSize(36);
+  fill(c);
+  text("" + sc[p], x, 22);
+
+  // lives as filled pips (if the mode tracks lives)
+  int lives = currentMode.playerLives(p);
+  float pipY = 66;
+  if (lives >= 0) {
+    float pipR = 5, gap = 5;
+    int n = max(1, lives);
+    float total = n * 2 * pipR + (n - 1) * gap;
+    float sx = left ? x : x - total;
+    noStroke();
+    for (int i = 0; i < n; i++) {
+      float cx = sx + pipR + i * (2 * pipR + gap);
+      if (i < lives) {
+        fill(c);
+      } else {
+        noFill();
+        stroke(c, 80);
+        strokeWeight(1);
+      }
+      ellipse(cx, pipY, 2 * pipR, 2 * pipR);
+      noStroke();
+    }
+    fill(c);
+  }
+
+  // start-zone status while waiting/ready, otherwise active powerups
+  textSize(11);
+  if (gameState == STATE_WAIT || gameState == STATE_READY) {
+    boolean inz = inZone(tags.get(p == 0 ? TAG0_ID : TAG1_ID), p == 0 ? P1_START : P2_START);
+    fill(inz ? color(140, 230, 140) : color(255, 150, 90));
+    text(inz ? "IN ZONE" : "GO TO ZONE", x, 78);
+  } else {
+    String[] fx = currentMode.playerEffects(p);
+    if (fx.length > 0) {
+      fill(235, 210, 150);
+      text(join(fx, "  "), x, 78);
+    }
+  }
   textAlign(LEFT, TOP);
 }
 
@@ -593,7 +683,7 @@ void drawWarnings() {
   if (oobActive[0]) warns.add("P1: GO BACK NOW OR LOSE A LIFE (" + (int)ceil(oobCountdown[0]) + "s)");
   if (oobActive[1]) warns.add("P2: GO BACK NOW OR LOSE A LIFE (" + (int)ceil(oobCountdown[1]) + "s)");
 
-  int y = 116;
+  int y = HUD_HEADER_H + 12;
   for (String w : warns) {
     boolean flash = w.startsWith("P1:") || w.startsWith("P2:");
     float a = flash ? (170 + 85 * sin(millis() / 150.0f)) : 215;
@@ -611,29 +701,32 @@ void drawWarnings() {
   }
 }
 
-void drawPlayerCard(int id, String label, color c, int x, int y) {
-  int w = 240;
-  int px = (x < width / 2) ? x : x - w;
-  int h = hudDebug ? 128 : 66;
-  hudPanel(px, y, w, h, label, c);
+// Debug overlay (D): compact raw tag info, only on demand so it never clutters
+// normal play.
+void drawDebugCards() {
+  int w = 300, h = 92, y = HUD_HEADER_H + 10;
+  drawDebugCard(TAG0_ID, "P1", C_T0, 10, y, w, h);
+  drawDebugCard(TAG1_ID, "P2", C_T1, width - 10 - w, y, w, h);
+}
+
+void drawDebugCard(int id, String label, color c, int x, int y, int w, int h) {
+  hudPanel(x, y, w, h, label + "  (debug)", c);
   TagData t = tags.get(id);
   fill(255);
+  textAlign(LEFT, TOP);
+  textSize(11);
   if (t == null) {
-    text("no frames yet", px + 8, y + 24);
+    text("no frames yet", x + 8, y + 24);
     return;
   }
   if (t.pos != null) {
-    text("pos  (" + nf(t.pos.x, 0, 0) + ", " + nf(t.pos.y, 0, 0) + ") mm", px + 8, y + 24);
-    text("speed  " + nf(t.speedMs / 1000.0f, 0, 2) + " m/s", px + 8, y + 42);
+    text("pos " + nf(t.pos.x, 0, 0) + ", " + nf(t.pos.y, 0, 0) + " mm   " + nf(t.speedMs / 1000.0f, 0, 2) + " m/s", x + 8, y + 24);
   } else {
-    text("pos  -- (no fix, <3 anchors)", px + 8, y + 24);
+    text("no fix (<3 anchors)", x + 8, y + 24);
   }
-  if (!hudDebug) return;
   fill(200);
-  text("tagid 0x" + hex(t.id, 4) + "   mask " + binary(t.mask, 8), px + 8, y + 62);
-  text(anchorStr(t, 0) + "  " + anchorStr(t, 1), px + 8, y + 80);
-  text(anchorStr(t, 2) + "  " + anchorStr(t, 3), px + 8, y + 96);
-  text("trail " + t.trail.size() + "/" + TRAIL_MAX, px + 8, y + 114);
+  text("tagid 0x" + hex(t.id, 4) + "  mask " + binary(t.mask, 8) + "  trail " + t.trail.size() + "/" + TRAIL_MAX, x + 8, y + 40);
+  text(anchorStr(t, 0) + "  " + anchorStr(t, 1) + "  " + anchorStr(t, 2) + "  " + anchorStr(t, 3), x + 8, y + 56);
   fill(255);
 }
 
@@ -642,50 +735,65 @@ String anchorStr(TagData t, int i) {
   return "A" + i + "=" + v;
 }
 
-void drawSystemPanel() {
-  int w = 360, h = 96, x = 10, y = height - h - 10;
-  hudPanel(x, y, w, h, "SYSTEM", color(180, 200, 220));
-  fill(255);
+// ============================ FOOTER ============================
+
+void drawFooter() {
+  int fy = height - HUD_FOOTER_H;
+  noStroke();
+  fill(12, 12, 18, 238);
+  rect(0, fy, width, HUD_FOOTER_H);
+  stroke(60);
+  line(0, fy, width, fy);
+  noStroke();
+
+  float cy = fy + HUD_FOOTER_H / 2.0f;
+  textAlign(LEFT, CENTER);
+  textSize(11);
+
+  color dot;
   String serial;
-  if (virtualOn) serial = "Virtual players ON (V = off)";
-  else if (port == null) serial = "Serial: NOT CONNECTED";
-  else serial = "Serial: " + portName + " @ " + BAUD;
-  text(serial, x + 8, y + 22);
-  fill(200);
-  text("frames " + frames + "  |  filters: Clamp[" + onOff(USE_SPEED_CLAMP) + "] EMA[" + onOff(USE_EMA) + " a=" + nf(SMOOTH_ALPHA, 0, 2) + "]", x + 8, y + 40);
-  text("OSC " + (OSC_ENABLED ? "ON -> " + OSC_TARGET_IP + ":" + OSC_TARGET_PORT + " sent " + oscSent : "OFF"), x + 8, y + 58);
-  text("scale " + nf(s, 0, 3) + " px/mm   grid 500 mm" + (hudKeys ? "" : "   [H = keys]"), x + 8, y + 76);
-  fill(255);
+  if (virtualOn) { dot = color(120, 180, 255); serial = "VIRTUAL SIM"; }
+  else if (port == null) { dot = color(255, 80, 80); serial = "SERIAL --"; }
+  else { dot = color(120, 230, 120); serial = "SERIAL OK"; }
+  fill(dot);
+  ellipse(16, cy, 10, 10);
+  text(serial, 26, cy);
+
+  fill(170);
+  text("OSC " + (OSC_ENABLED ? OSC_TARGET_IP + ":" + OSC_TARGET_PORT : "OFF")
+    + "   frames " + frames + "   scale " + nf(s, 0, 3), 150, cy);
+
+  fill(170);
+  text("Clamp " + onOff(USE_SPEED_CLAMP) + "  EMA " + onOff(USE_EMA) + " a=" + nf(SMOOTH_ALPHA, 0, 2), 430, cy);
+
+  textAlign(RIGHT, CENTER);
+  fill(150);
+  text("V virtual   R reset   SPACE start   TAB setup   M mode   D debug   H help", width - 14, cy);
+  textAlign(LEFT, TOP);
 }
 
-void drawModePanel() {
-  String[] lines = currentMode.hudLines();
-  if (lines == null || lines.length == 0) return;
-  int w = 250, h = 22 + lines.length * 16 + 8;
-  int x = width - w - 10, y = height - h - 10;
-  hudPanel(x, y, w, h, currentMode.displayName.toUpperCase(), color(220, 180, 255));
-  fill(255);
-  for (int i = 0; i < lines.length; i++) text(lines[i], x + 8, y + 22 + i * 16);
-}
+// ============================ KEY HELP OVERLAY (H) ============================
 
-void drawKeyPanel() {
+void drawKeyHelp() {
   String[] lines = {
     "TAB ........ Setup mode",
-    "M .......... next Mode",
-    "V .......... Virtual players",
+    "M .......... next mode / reset",
+    "V .......... virtual players (debug)",
     "SPACE ...... start / skip round",
     "R .......... reset / abort round",
     "1 / 2 ...... filters on/off",
     "4 .......... EMA alpha",
     "D .......... tag debug details",
-    "H .......... hide this panel",
+    "H .......... hide this help",
     "WASD / arrows = move virtual P1/P2"
   };
-  int w = 270, h = 22 + lines.length * 16 + 8;
-  int x = width - w - 10, y = 10;
+  int w = 300, h = 24 + lines.length * 18 + 10;
+  int x = width / 2 - w / 2, y = height / 2 - h / 2;
   hudPanel(x, y, w, h, "KEYS", color(180, 200, 220));
   fill(255);
-  for (int i = 0; i < lines.length; i++) text(lines[i], x + 8, y + 22 + i * 16);
+  textAlign(LEFT, TOP);
+  textSize(12);
+  for (int i = 0; i < lines.length; i++) text(lines[i], x + 10, y + 26 + i * 18);
 }
 
 class TagData {
