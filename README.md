@@ -37,9 +37,19 @@ Die Evolution von *WeAre*. Spieler tragen VR-Headsets (Raspberry Pi) und UWB-Tag
 ## Software
 
 ### Architektur (aktueller Stand)
-- **Sender** (`sender/`, Processing): läuft auf einem MacBook, das per USB am Anchor hängt. Liest Tag-Distanzen aus, berechnet Koordinaten, enthält die komplette Game-Logik (GameStates, Coin, Scores) und schickt alles per OSC an die Receiver.
+- **Sender** (`sender_py/`, Python): läuft auf einem MacBook/Mini-PC, das per USB am Anchor hängt. Liest Tag-Distanzen aus, berechnet Koordinaten, enthält die komplette Game-Logik (GameStates, Coin, Scores) und schickt alles per OSC an die Receiver. Headless mit `--headless`, Simulation ohne Hardware mit `--sim`.
+- **Sender (Legacy)** (`sender/`, Processing): der ursprüngliche Processing-Sketch, bleibt als Referenz erhalten.
 - **Receiver** (`receiver/`, Python/Pygame): läuft auf den Raspberry-Pi-VR-Headsets. Empfängt OSC auf Port 8000 und visualisiert das Spiel (Split-Screen-Stereo für beide Augen).
+- **Shared** (`shared/protocol.py`): Gemeinsame Konstanten (GameStates, Startzonen, OSC-Adressen), genutzt von Sender und Receiver.
 - **OSC-Protokoll:** siehe `docs/osc-protocol.md`.
+
+### Python-Sender starten
+```bash
+pip install -r sender_py/requirements.txt
+python sender_py/main.py            # GUI
+python sender_py/main.py --sim      # virtuelle Spieler (WASD/Pfeile)
+python sender_py/main.py --headless # ohne Fenster
+```
 
 ### Repo-Struktur
 ```

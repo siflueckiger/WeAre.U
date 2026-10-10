@@ -32,7 +32,8 @@ Session.vim
 
 # Python
 __pycache__/
-__init__.py
+*.py[cod]
+sender_py/config.json
 
 # ========================
 # Logs & Debugging
