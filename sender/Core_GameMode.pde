@@ -14,6 +14,7 @@ abstract class GameMode {
   }
 
   void onModeEnter() {}                 // mode selected (engine setup / switch)
+  void onRoundEnd() {}                  // round left (abort/end) -> free mode refs
   abstract void onRoundStart();         // engine calls when PLAYING begins
   abstract void update(float dt);       // per-frame during PLAYING, dt in seconds
   abstract int[] scores();              // { p1, p2 } for /game/stats + HUD
@@ -45,6 +46,15 @@ GameMode currentMode = modes[0];
 int modeIndex = 0;
 
 void nextMode() {
+  if (modes.length <= 1) {
+    // Only one mode: M acts as a clean reset of the current mode.
+    clearEntities();
+    currentMode.onRoundEnd();
+    setState(STATE_WAIT);
+    sendModeOsc();
+    println("mode reset -> " + currentMode.displayName);
+    return;
+  }
   selectMode((modeIndex + 1) % modes.length);
 }
 
@@ -91,6 +101,17 @@ void setState(int s) {
       oobCountdown[i] = OOB_TIMEOUT_S;
       oobActive[i] = false;
     }
+  } else {
+    // Every non-playing state must clean up: no leftover entities, no stuck
+    // out-of-bounds warning, no stale winner, no running timer.
+    clearEntities();
+    for (int i = 0; i < 2; i++) {
+      oobCountdown[i] = OOB_TIMEOUT_S;
+      oobActive[i] = false;
+    }
+    roundWinner = -1;
+    timeLeft = (s == STATE_READY) ? READY_S : 0;
+    currentMode.onRoundEnd();
   }
   println("game state -> " + stateName(s));
 }

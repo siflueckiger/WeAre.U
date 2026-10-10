@@ -232,6 +232,7 @@ void keyPressed() {
     return;
   }
   if (key == TAB) {
+    if (appMode == MODE_GAME) setState(STATE_WAIT);   // abort any running round
     setAppMode(appMode == MODE_GAME ? MODE_SETUP : MODE_GAME);
     return;
   }
@@ -247,6 +248,12 @@ void keyPressed() {
 
   if (key == 'm' || key == 'M') {
     nextMode();
+    return;
+  }
+  if (key == 'r' || key == 'R') {
+    setState(STATE_WAIT);              // reset / abort the round at any time
+    if (virtualEnabled()) resetVirtualPlayers();
+    println("round reset (R)");
     return;
   }
   if (key == 'd' || key == 'D') {
@@ -273,9 +280,13 @@ void keyPressed() {
     else SMOOTH_ALPHA = 0.15f;
     println("EMA alpha: " + SMOOTH_ALPHA);
   } else if (key == ' ') {
-    // debug: start round immediately, skipping the start-zone check
-    if (gameState == STATE_WAIT || gameState == STATE_GAMEOVER) {
+    // debug: start / skip through the round from any state
+    if (gameState == STATE_WAIT) {
       debugStartRound();
+    } else if (gameState == STATE_READY) {
+      debugStartRound();   // skip the remaining countdown
+    } else if (gameState == STATE_GAMEOVER) {
+      setState(STATE_WAIT);   // skip the result screen
     }
   } else {
     currentMode.keyPressed(key);   // mode-specific keys
@@ -662,7 +673,8 @@ void drawKeyPanel() {
     "TAB ........ Setup mode",
     "M .......... next Mode",
     "V .......... Virtual players",
-    "SPACE ...... start round (debug)",
+    "SPACE ...... start / skip round",
+    "R .......... reset / abort round",
     "1 / 2 ...... filters on/off",
     "4 .......... EMA alpha",
     "D .......... tag debug details",

@@ -22,8 +22,54 @@ boolean virtualEnabled() {
 
 void toggleVirtual() {
   virtualOn = !virtualOn;
-  if (virtualOn) ensureVirtualPlayers();
+  if (virtualOn) {
+    setState(STATE_WAIT);   // clean start before the simulation takes over
+    ensureVirtualPlayers();
+  } else {
+    // Leaving virtual play: stop any running round and drop the phantom tags
+    // so their last coordinates can't keep the timer alive or re-trigger the
+    // start zones on their own.
+    setState(STATE_WAIT);
+    clearVirtualPlayers();
+    vKeys.clear();
+    vCodes.clear();
+    virtualLastMs = 0;
+  }
   println("Virtual play: " + onOff(virtualOn) + " (WASD = P1, arrows = P2)");
+}
+
+// Drop the simulated positions completely. Real UWB frames (if connected)
+// will repopulate them on the next serial frame; otherwise the engine sees
+// no players and simply stays in STATE_WAIT.
+void clearVirtualPlayers() {
+  for (int i = 0; i < 2; i++) {
+    int id = (i == 0) ? TAG0_ID : TAG1_ID;
+    TagData t = tags.get(id);
+    if (t == null) continue;
+    t.pos = null;
+    t.trail.clear();
+    t.speedMs = 0;
+    t.lastFixMs = 0;
+  }
+}
+
+// Snap the simulated players back to their start zones (R key while virtual).
+void resetVirtualPlayers() {
+  for (int i = 0; i < 2; i++) {
+    int id = (i == 0) ? TAG0_ID : TAG1_ID;
+    float[] start = (i == 0) ? P1_START : P2_START;
+    TagData t = tags.get(id);
+    if (t == null) {
+      t = new TagData(id);
+      tags.put(id, t);
+    }
+    t.pos = new PVector(start[0], start[1]);
+    t.trail.clear();
+    t.speedMs = 0;
+    t.lastFixMs = millis();
+    sendPos(id, t.pos.x, t.pos.y);
+  }
+  virtualLastMs = 0;
 }
 
 // Fill in positions only if a player has none yet -- never snap existing

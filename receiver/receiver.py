@@ -79,6 +79,7 @@ class TagData:
         self.id = tag_id
         self.pos = None
         self.trail = []
+        self.last_ms = 0
 
 
 def make_pos_handler(tag_id):
@@ -97,6 +98,7 @@ def make_pos_handler(tag_id):
         t.trail.append(t.pos)
         if len(t.trail) > TRAIL_MAX:
             t.trail.pop(0)
+        t.last_ms = last_packet_ms
     return handler
 
 
@@ -177,15 +179,24 @@ def anchors_handler(address, *args):
 
 def stats_handler(address, *args):
     global game_state, time_left, p1_score, p2_score, winner, packets, last_packet_ms
+    global result_title, result_subtitle
     if len(args) < 4:
         return
     packets += 1
     last_packet_ms = pygame.time.get_ticks()
-    game_state = int(args[0])
+    new_state = int(args[0])
+    game_state = new_state
     time_left = int(args[1])
     p1_score = int(args[2])
     p2_score = int(args[3])
     winner = int(args[4]) if len(args) >= 5 else -1
+    # Leaving the round: drop any stale warnings / result overlay so nothing
+    # from the previous round lingers into WAIT.
+    if new_state == STATE_WAIT:
+        oob[0] = None
+        oob[1] = None
+        result_title = None
+        result_subtitle = None
 
 
 def oob_handler(address, *args):
@@ -284,6 +295,10 @@ def draw_tag(surface, layer, tag_id, color, label, s, ox, oy, blink=False):
             f = int(15 + (i - 1) * (200 - 15) / max(1, len(t.trail) - 2))
             pygame.draw.line(layer, (*color, f), a, b, 2)
     if t.pos is not None and not blink:
+        # Dim/hide a tag whose position updates stopped (lost tracking, or the
+        # virtual simulation was turned off) so no phantom dot stays on screen.
+        if pygame.time.get_ticks() - t.last_ms > STALE_MS:
+            return
         p = scr(t.pos[0], t.pos[1], s, ox, oy)
         pygame.draw.circle(surface, color, p, 7)
         pygame.draw.circle(surface, (255, 255, 255), p, 7, 2)

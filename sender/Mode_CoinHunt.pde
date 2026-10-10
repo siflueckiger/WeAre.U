@@ -59,6 +59,20 @@ class ModeCoinHunt extends GameMode {
     super("coinHunt", "Coin Hunt");
   }
 
+  void onRoundEnd() {
+    coin = null;
+    powerup = null;
+    enemies.clear();
+    enemiesSpawned = false;
+    freezeAll = 0;
+    nextCoinDouble = false;
+    for (int i = 0; i < 2; i++) {
+      invuln[i] = 0;
+      magnet[i] = 0;
+      invis[i]  = 0;
+    }
+  }
+
   void onRoundStart() {
     scoreP1 = 0;
     scoreP2 = 0;
@@ -180,6 +194,12 @@ class ModeCoinHunt extends GameMode {
     if (player == 0) scoreP1 += gain;
     else scoreP2 += gain;
     println("P" + (player + 1) + " collected coin (+" + gain + ") -> P1:" + scoreP1 + " P2:" + scoreP2);
+    // Magnet is consumed by the player who actually captures the coin; if the
+    // other player steals it, the holder's magnet keeps running for the next coin.
+    if (magnet[player] > 0) {
+      magnet[player] = 0;
+      println("P" + (player + 1) + " magnet consumed on coin capture");
+    }
     if (coin != null) removeEntity(coin.id);
     coin = null;
     maybeSpawnEnemies();
