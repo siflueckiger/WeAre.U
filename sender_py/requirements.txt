@@ -1,3 +1,0 @@
-pygame
-python-osc
-pyserial

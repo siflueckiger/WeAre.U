@@ -33,7 +33,7 @@ Session.vim
 # Python
 __pycache__/
 *.py[cod]
-sender_py/config.json
+sender/config.json
 
 # ========================
 # Logs & Debugging
@@ -60,3 +60,11 @@ temp/
 # ========================
 
 docs/hardware/references/
+3DPrint/
+
+## ========================
+# Node / Sender
+# ========================
+
+sender/node_modules/
+sender/dist/
